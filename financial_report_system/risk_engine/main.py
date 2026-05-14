@@ -20,7 +20,10 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from file_parser import load_all_files, load_files_multi_period
+from file_parser import (
+    load_all_files, load_files_multi_period,
+    extract_three_statements, check_cross_statement_consistency
+)
 from risk_analyzer import calculate_metrics, compute_total_score
 from report_generator import generate_report
 
@@ -93,6 +96,39 @@ def main():
         data['financial'] = _demo_financial()
         data['latest'] = data['financial']
         data['earliest'] = {}
+        data['three_stmt'] = {}
+        data['consistency'] = []
+
+    # ─── Step 1.5：三表勾稽校验 ─────────────────────────────
+    print('\n[1.5/4] 三表勾稽校验...')
+    three_stmt = {}
+    consistency_result = []
+    
+    # 尝试从最新文件中提取三表数据
+    latest_file = None
+    for f in data.get('file_list', []):
+        if f.endswith(('.xls', '.xlsx')):
+            latest_file = f
+            break
+    
+    if latest_file and os.path.exists(latest_file):
+        try:
+            three_stmt = extract_three_statements(latest_file)
+            if three_stmt.get('balance_sheet') or three_stmt.get('income_statement'):
+                print(f'  ✅ 三表提取成功')
+                consistency_result = check_cross_statement_consistency(three_stmt)
+                print(f'  ✅ 勾稽校验完成（{len(consistency_result)} 项）')
+            else:
+                print('  ⚠ 三表数据不完整')
+        except Exception as e:
+            print(f'  ⚠ 勾稽校验跳过: {str(e)[:50]}')
+            three_stmt = {}
+            consistency_result = []
+    else:
+        print('  ⚠ 未找到有效财务文件，跳过勾稽校验')
+    
+    data['three_stmt'] = three_stmt
+    data['consistency'] = consistency_result
 
     # ─── Step 2：计算指标 ─────────────────────────────────
     print('\n[2/4] 计算财务指标（含知识库触发）...')
@@ -158,6 +194,8 @@ def main():
         periods        = periods,
         period_details = data.get('period_details', {}),
         output_path    = out_path,
+        three_stmt     = data.get('three_stmt', {}),
+        consistency_result = data.get('consistency', []),
     )
 
     print(f'\n{"=" * 62}')
