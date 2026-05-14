@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# 财务报表系统
+.env
+uploads/*
+!uploads/.gitkeep
+**/reports/*.html
+!**/reports/.gitkeep
+server.log
+*.zip
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Workbuddy
+.workbuddy/

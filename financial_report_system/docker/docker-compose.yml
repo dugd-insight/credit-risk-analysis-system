@@ -1,0 +1,33 @@
+# =============================================================================
+# 信贷风险分析系统 - Docker Compose 配置
+# =============================================================================
+
+services:
+  # 信贷风险分析系统
+  financial-report:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: financial_report_system
+    ports:
+      - "8000:8000"
+    volumes:
+      # 持久化上传文件和报告
+      - ../data:/app/data
+      - ./reports:/app/reports
+      - ./uploads:/app/uploads
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# 网络配置
+networks:
+  default:
+    name: financial_report_network
