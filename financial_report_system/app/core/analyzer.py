@@ -25,7 +25,7 @@ if str(RISK_ENGINE_DIR) not in sys.path:
 
 # 导入分析模块
 try:
-    from file_parser import load_all_files, load_files_multi_period
+    from file_parser import load_all_files, load_files_multi_period, extract_three_statements, check_cross_statement_consistency
     from risk_analyzer import calculate_metrics, compute_total_score
     from knowledge_base import KNOWLEDGE_BASE
     ENGINE_IMPORTED = True
@@ -77,6 +77,9 @@ def analyze_company(
         periods = sorted(data.get('periods', {}).keys())
         period_details = data.get('periods', {})
         analysis_notes = data.get('analysis_notes', [])
+        
+        # 提取文件路径列表（用于报告展示）
+        file_list = data.get('file_list', [])
 
         if not financial:
             return {
@@ -122,6 +125,8 @@ def analyze_company(
             "dimension_scores": score_result.get("dimension_scores", {}),
             "weights": score_result.get("weights", {}),
             "veto": score_result.get("veto", False),
+            # 新增：文件列表
+            "file_list": file_list,
             # 新增：期间类型信息
             "period_info": {
                 "latest": latest_period_info,
@@ -133,6 +138,23 @@ def analyze_company(
                 "previous_type": prev_period_info.get('report_type', 'unknown'),
             }
         }
+        
+        # 6. 提取三表数据并进行勾稽校验（v3.0新增）
+        if periods:
+            latest_period = periods[-1]
+            latest_fp = period_details.get(latest_period, {}).get('filepath', '')
+            if latest_fp and os.path.exists(latest_fp):
+                try:
+                    three_stmt = extract_three_statements(latest_fp)
+                    result['three_stmt'] = three_stmt
+                    # 执行三表勾稽校验
+                    consistency_result = check_cross_statement_consistency(three_stmt)
+                    result['consistency_result'] = consistency_result
+                except Exception as e:
+                    import traceback
+                    print(f"三表提取/校验失败: {e}")
+                    result['three_stmt'] = {}
+                    result['consistency_result'] = []
         
         return result
 

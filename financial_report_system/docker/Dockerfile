@@ -1,63 +1,63 @@
 # =============================================================================
-# 信贷风险分析系统 - Dockerfile
+# 信贷风险分析系统 v3.0 - Dockerfile
+# =============================================================================
+# 多阶段构建：减小最终镜像体积
 # =============================================================================
 
-# 基础镜像：Python 3.11 + 轻量化
-FROM python:3.11-slim
+# ── 构建阶段 ──
+FROM python:3.11-slim AS builder
 
-# 设置环境变量
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV TZ=Asia/Shanghai
+WORKDIR /build
 
-# 设置工作目录
+# 安装编译依赖（仅构建阶段需要）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# ── 运行阶段 ──
+FROM python:3.11-slim AS runtime
+
+LABEL maintainer="dugd-insight"
+LABEL description="信贷风险分析系统 v3.0 - 企业信用风险评估平台"
+LABEL version="3.0"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TZ=Asia/Shanghai \
+    PATH="/install/bin:${PATH}"
+
 WORKDIR /app
 
-# ─────────────────────────────────────────────
-# 1. 安装系统依赖（字体支持PDF中文）
-# ─────────────────────────────────────────────
-RUN apt-get update && apt-get install -y \
-    gcc \
+# 安装运行时系统依赖（中文字体支持 PDF 生成）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     fonts-wqy-microhei \
     fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -f -v
 
-# ─────────────────────────────────────────────
-# 2. 复制依赖文件
-# ─────────────────────────────────────────────
-COPY requirements.txt .
+# 从构建阶段复制 Python 包
+COPY --from=builder /install /usr/local
 
-# ─────────────────────────────────────────────
-# 3. 安装 Python 依赖
-# ─────────────────────────────────────────────
-RUN pip install --no-cache-dir -r requirements.txt
-
-# ─────────────────────────────────────────────
-# 4. 复制应用代码
-# ─────────────────────────────────────────────
+# 复制应用代码
 COPY app/ ./app/
 COPY risk_engine/ ./risk_engine/
-COPY static/ ./static/
+
+# 复制配置模板
 COPY .env.example ./.env
 
-# ─────────────────────────────────────────────
-# 5. 创建必要的目录
-# ─────────────────────────────────────────────
-RUN mkdir -p /app/uploads /app/reports
+# 创建必要目录（运行时由 volume 挂载覆盖）
+RUN mkdir -p /app/uploads /app/reports /app/data /app/static
 
-# ─────────────────────────────────────────────
-# 6. 暴露端口
-# ─────────────────────────────────────────────
+# 数据目录放置示例说明
+RUN echo "将企业财务报表文件（.xls/.xlsx）放入此目录" > /app/data/README.txt
+
 EXPOSE 8000
 
-# ─────────────────────────────────────────────
-# 7. 健康检查
-# ─────────────────────────────────────────────
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# ─────────────────────────────────────────────
-# 8. 启动命令
-# ─────────────────────────────────────────────
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

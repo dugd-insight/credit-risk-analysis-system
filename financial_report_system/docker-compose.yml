@@ -1,23 +1,21 @@
 # =============================================================================
-# 信贷风险分析系统 v3.0 - Docker Compose 配置
+# 信贷风险分析系统 v3.0 - 顶层 Docker Compose（便捷入口）
+# 用法：在项目根目录执行 docker compose up --build -d
 # =============================================================================
 
 services:
   financial-report:
     build:
-      context: ..
-      dockerfile: docker/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     image: credit-risk-analysis:3.0
     container_name: financial_report_system
     ports:
       - "${SERVER_PORT:-8000}:8000"
     volumes:
-      # 持久化数据目录（上传的报表文件）
-      - ../data:/app/data
-      # 持久化报告输出
-      - ../reports:/app/reports
-      # 持久化上传临时文件
-      - ../uploads:/app/uploads
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./uploads:/app/uploads
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Asia/Shanghai
@@ -41,7 +39,3 @@ services:
       options:
         max-size: "50m"
         max-file: "3"
-
-networks:
-  default:
-    name: financial_report_network

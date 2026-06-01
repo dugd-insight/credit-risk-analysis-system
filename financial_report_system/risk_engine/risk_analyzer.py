@@ -1,13 +1,32 @@
 # -*- coding: utf-8 -*-
 """
-六维风险分析引擎 v2.0
+六维风险分析引擎 v3.0
 - 行业差异化评分权重
 - 跨期趋势指标（当有多期数据时自动激活）
 - Beneish M-Score 财务造假预警
+- 模块化指标计算（拆分自原 calculate_metrics）
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import math
+
+from knowledge_base import get_triggered_rules, KNOWLEDGE_BASE
+from constants import (
+    EPSILON, ACCOUNTING_EQUATION_TOLERANCE, DEBT_RATIO_ERROR_THRESHOLD,
+    TAX_DIFF_TOLERANCE, CURRENT_ASSETS_MAX_RATIO, COST_REVENUE_MAX_RATIO,
+    ASSUMED_FINANCING_COST, GPM_LOW, GPM_HIGH, NPM_LOW, NPM_HIGH,
+    ROE_LOW, ROE_HIGH, ROA_LOW, ROA_HIGH, GROWTH_NEUTRAL, GROWTH_GOOD,
+    VAT_GAP_PENALTY_FACTOR, MSCORE_SAFE, MSCORE_DANGER,
+    BENEISH_COEFFICIENTS, CURRENT_RATIO_CAP, CURRENT_RATIO_CENTER,
+    CURRENT_RATIO_STEEPNESS, QUICK_RATIO_CAP, QUICK_RATIO_CENTER,
+    QUICK_RATIO_STEEPNESS, DEBT_RATIO_CENTER, DEBT_RATIO_STEEPNESS,
+    ICR_CAP, ICR_CENTER, ICR_STEEPNESS, CASH_RATIO_CAP, CASH_RATIO_CENTER,
+    CASH_RATIO_STEEPNESS, TAX_RATE_OPTIMAL, TAX_RATE_PENALTY,
+    TURNOVER_STEEPNESS, GROWTH_STEEPNESS, DEBT_RATIO_CHANGE_PENALTY,
+    DEPOSIT_CHANGE_THRESHOLD, DEPOSIT_CHANGE_PENALTY,
+    ASSET_DECLINE_THRESHOLD, ANOMALY_SCORE_INCONSISTENT,
+    ASSUMED_AR_REVENUE_RATIO, DSRI_CAP, INDUSTRY_WEIGHTS, CREDIT_GRADES
+)
 
 
 # ─────────────────────────────────────────────
@@ -28,80 +47,14 @@ def _sigmoid_score(v: float, center: float, steepness: float = 8.0,
     if direction == 'lower_is_better':
         v = 2 * center - v   # 对称翻转
     try:
-        score = 100.0 / (1.0 + math.exp(-steepness * (v - center) / (abs(center) + 1e-9)))
+        score = 100.0 / (1.0 + math.exp(-steepness * (v - center) / (abs(center) + EPSILON)))
         return round(min(100.0, max(0.0, score)), 1)
     except Exception:
         return 50.0
-from knowledge_base import get_triggered_rules, KNOWLEDGE_BASE
 
 
-# ─────────────────────────────────────────────
-# 行业权重配置
-# ─────────────────────────────────────────────
-
-INDUSTRY_WEIGHTS = {
-    '制造业': {
-        'solvency':      0.30,
-        'profitability': 0.25,
-        'cashflow':      0.20,
-        'operations':    0.15,
-        'tax_compliance': 0.05,
-        'fraud_alert':   0.05,
-    },
-    '零售/批发': {
-        'solvency':      0.25,
-        'profitability': 0.30,
-        'cashflow':      0.25,
-        'operations':    0.15,
-        'tax_compliance': 0.05,
-        'fraud_alert':   0.00,
-    },
-    '担保/金融服务': {
-        'solvency':      0.35,
-        'profitability': 0.20,
-        'cashflow':      0.15,
-        'operations':    0.10,
-        'tax_compliance': 0.15,
-        'fraud_alert':   0.05,
-    },
-    '建筑/地产': {
-        'solvency':      0.30,
-        'profitability': 0.20,
-        'cashflow':      0.25,
-        'operations':    0.10,
-        'tax_compliance': 0.10,
-        'fraud_alert':   0.05,
-    },
-    '农业/食品': {
-        'solvency':      0.28,
-        'profitability': 0.22,
-        'cashflow':      0.22,
-        'operations':    0.13,
-        'tax_compliance': 0.10,
-        'fraud_alert':   0.05,
-    },
-    '通用': {
-        'solvency':      0.30,
-        'profitability': 0.25,
-        'cashflow':      0.20,
-        'operations':    0.12,
-        'tax_compliance': 0.08,
-        'fraud_alert':   0.05,
-    },
-}
-
-CREDIT_GRADES = [
-    (90, 100, 'AAA', '建议足额授信', 'green'),
-    (80,  90, 'AA',  '建议正常授信', 'green'),
-    (70,  80, 'A',   '审慎授信', 'yellow'),
-    (60,  70, 'BBB', '附条件授信', 'yellow'),
-    (50,  60, 'BB',  '压缩授信额度', 'orange'),
-    (40,  50, 'B',   '建议拒绝或要求强担保', 'red'),
-    (0,   40, 'CCC', '拒绝授信', 'red'),
-]
-
-
-def get_credit_grade(score: float):
+def get_credit_grade(score: float) -> Tuple[str, str, str]:
+    """根据分数获取信用等级、建议和颜色"""
     for low, high, grade, suggestion, color in CREDIT_GRADES:
         if low <= score <= high:
             return grade, suggestion, color
@@ -124,10 +77,10 @@ def _validate_financial_data(f: Dict) -> Dict:
     tl = f.get('total_liabilities') or 0
     te = f.get('total_equity') or 0
 
-    # 1. 会计恒等式：资产 = 负债 + 权益（允许 5% 误差）
+    # 1. 会计恒等式：资产 = 负债 + 权益
     if ta > 0 and tl > 0 and te > 0:
         diff_rate = abs(ta - tl - te) / ta
-        if diff_rate > 0.05:
+        if diff_rate > ACCOUNTING_EQUATION_TOLERANCE:
             warnings.append(
                 f'会计恒等式不平衡：资产={ta/1e4:.1f}万，'
                 f'负债+权益={(tl+te)/1e4:.1f}万，'
@@ -135,7 +88,7 @@ def _validate_financial_data(f: Dict) -> Dict:
             )
 
     # 2. 负债率合理性
-    if ta > 0 and tl > ta * 1.2:
+    if ta > 0 and tl > ta * DEBT_RATIO_ERROR_THRESHOLD:
         errors.append(f'负债({tl/1e4:.1f}万)超过总资产({ta/1e4:.1f}万)120%，数据可能有误')
 
     # 3. 净利润 vs 利润总额一致性
@@ -144,7 +97,7 @@ def _validate_financial_data(f: Dict) -> Dict:
     tax_f = f.get('income_tax') or 0
     if pbt != 0 and np != 0:
         implied_tax = pbt - np
-        if tax_f > 0 and abs(implied_tax - tax_f) / (abs(pbt) + 1) > 0.3:
+        if tax_f > 0 and abs(implied_tax - tax_f) / (abs(pbt) + 1) > TAX_DIFF_TOLERANCE:
             warnings.append(
                 f'所得税金额异常：利润总额-净利润={implied_tax/1e4:.1f}万，'
                 f'财报所得税={tax_f/1e4:.1f}万，差异较大'
@@ -152,57 +105,39 @@ def _validate_financial_data(f: Dict) -> Dict:
 
     # 4. 流动资产不能超过总资产
     ca = f.get('current_assets') or 0
-    if ca > 0 and ta > 0 and ca > ta * 1.05:
+    if ca > 0 and ta > 0 and ca > ta * CURRENT_ASSETS_MAX_RATIO:
         warnings.append(f'流动资产({ca/1e4:.1f}万)超过总资产({ta/1e4:.1f}万)，数据可能有误')
 
-    # 5. 营业收入与成本关系（成本不应超过收入3倍，否则异常）
+    # 5. 营业收入与成本关系
     rev  = f.get('revenue') or 0
     cogs = f.get('cost_of_sales') or 0
-    if rev > 0 and cogs > rev * 3:
+    if rev > 0 and cogs > rev * COST_REVENUE_MAX_RATIO:
         warnings.append(f'营业成本({cogs/1e4:.1f}万)远超收入({rev/1e4:.1f}万)，请核实')
 
     return {'warnings': warnings, 'errors': errors}
+
 
 # ─────────────────────────────────────────────
 # 基础工具
 # ─────────────────────────────────────────────
 
-def safe_div(a, b, default=None):
+def safe_div(a: float, b: float, default: Optional[float] = None) -> Optional[float]:
+    """安全除法，避免除零错误"""
     try:
-        if b and abs(b) > 1e-9:
+        if b and abs(b) > EPSILON:
             return a / b
         return default
     except Exception:
         return default
 
 
-def _pct_change(new_val, old_val):
-    """计算变化率：(new - old) / |old|"""
-    if old_val is None or new_val is None:
-        return None
-    if abs(old_val) < 1e-6:
-        return None
-    return (new_val - old_val) / abs(old_val)
-
-
 # ─────────────────────────────────────────────
-# 主指标计算
+# 分维度指标计算（拆分自原 calculate_metrics）
 # ─────────────────────────────────────────────
 
-def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
-                       fin_prev: Optional[Dict[str, float]] = None) -> Dict:
-    """
-    计算所有分析指标
-    fin: 最新期财务数据
-    tax: 税务数据
-    fin_prev: 上一期财务数据（用于趋势分析，可选）
-    返回：{指标名: {value, score, triggered_rules, ...}}
-    """
-    f = fin
-    fp = fin_prev or {}
+def _calculate_data_validation(f: Dict) -> Dict:
+    """计算数据校验指标"""
     metrics = {}
-
-    # ────────── 数据完整性校验（先于所有计算）──────────
     validation = _validate_financial_data(f)
     if validation['warnings']:
         metrics['__data_warnings__'] = {
@@ -212,17 +147,20 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
             'score': max(0, 100 - len(validation['warnings']) * 20),
             'triggered_rules': [],
         }
+    return metrics
 
-    # ────────── 偿债能力 ──────────
+
+def _calculate_solvency_metrics(f: Dict) -> Dict:
+    """计算偿债能力指标"""
+    metrics = {}
+
     current_assets    = f.get('current_assets', 0) or 0
     current_liab      = f.get('current_liabilities', 0) or 0
     cash              = f.get('cash', 0) or 0
     inventory         = f.get('inventory', 0) or 0
     total_assets      = f.get('total_assets', 0) or 0
     total_liabilities = f.get('total_liabilities', 0) or 0
-    total_equity      = f.get('total_equity', 0) or 0
-    interest_expense  = f.get('interest_expense') or f.get('finance_cost') or f.get('business_tax', 0) or 0
-    net_profit        = f.get('net_profit', 0) or 0
+    interest_expense  = f.get('interest_expense') or f.get('finance_cost_interest') or f.get('finance_cost') or 0
     profit_before_tax = f.get('profit_before_tax', 0) or 0
     operating_profit  = f.get('operating_profit', 0) or 0
 
@@ -259,12 +197,11 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         'triggered_rules': get_triggered_rules('debt_ratio', dr) if dr is not None else [],
     }
 
-    # 利息保障倍数（担保公司无利息负债时用营业利润/营业税金代替）
+    # 利息保障倍数
     ebit = profit_before_tax + interest_expense
     icr = safe_div(ebit, interest_expense) if interest_expense > 0 else None
-    # 担保公司：若无利息，用营业利润是否充裕来评分
     if icr is None and operating_profit > 0:
-        icr = operating_profit / max(total_liabilities * 0.05, 1)  # 假设5%融资成本
+        icr = operating_profit / max(total_liabilities * ASSUMED_FINANCING_COST, 1)
     metrics['interest_coverage'] = {
         'label': '利息保障倍数',
         'value': icr,
@@ -274,10 +211,20 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         'triggered_rules': get_triggered_rules('interest_coverage', icr) if icr is not None else [],
     }
 
-    # ────────── 盈利能力 ──────────
-    revenue      = f.get('revenue', 0) or 0
+    return metrics
+
+
+def _calculate_profitability_metrics(f: Dict, fp: Dict) -> Dict:
+    """计算盈利能力指标"""
+    metrics = {}
+
+    revenue       = f.get('revenue', 0) or 0
     cost_of_sales = f.get('cost_of_sales', 0) or 0
-    income_tax   = f.get('income_tax', 0) or 0
+    net_profit    = f.get('net_profit', 0) or 0
+    total_equity  = f.get('total_equity', 0) or 0
+    total_assets  = f.get('total_assets', 0) or 0
+    income_tax    = f.get('income_tax', 0) or 0
+    profit_before_tax = f.get('profit_before_tax', 0) or 0
 
     # 毛利率
     gross_profit = revenue - cost_of_sales
@@ -287,7 +234,7 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         'value': gpm,
         'unit': '%',
         'benchmark': '担保行业：≥ 20%',
-        'score': _score_margin(gpm, 0.15, 0.35),
+        'score': _score_margin(gpm, GPM_LOW, GPM_HIGH),
         'triggered_rules': [],
     }
 
@@ -298,30 +245,28 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         'value': npm,
         'unit': '%',
         'benchmark': '> 5%（基准）',
-        'score': _score_margin(npm, 0.03, 0.15),
+        'score': _score_margin(npm, NPM_LOW, NPM_HIGH),
         'triggered_rules': [],
     }
 
     # ROE（净资产收益率）
-    # 如果是Q1季度数据（从 periods 无法直接获知，通过 fin_prev 判断），折年化
-    # 简单处理：如果上期为全年，当前期净利润可能是Q1，折年化评分
     roe_raw = safe_div(net_profit, total_equity)
-    # 检查是否需要折年化（当利润远小于上一期时，认为是季度数据）
+    roe = roe_raw
     roe_annualized = None
-    if roe_raw is not None and fp:
+    ann_factor = f.get('_annualization_factor', 1.0)
+    if ann_factor <= 1.0 and roe_raw is not None and fp:
         prev_np = fp.get('net_profit', 0) or 0
         prev_eq = fp.get('total_equity', 0) or 0
         if prev_np > 0 and net_profit > 0 and net_profit < prev_np * 0.5:
-            # 当前期净利润显著小于上期，推断为季度数据，折年化（×4）
             roe_annualized = safe_div(net_profit * 4, total_equity)
-    roe = roe_annualized if roe_annualized is not None else roe_raw
+            roe = roe_annualized
     roe_label = '净资产收益率(ROE，折年)' if roe_annualized is not None else '净资产收益率(ROE)'
     metrics['roe'] = {
         'label': roe_label,
         'value': roe,
         'unit': '%',
         'benchmark': '> 10%（优良）',
-        'score': _score_margin(roe, 0.05, 0.15),
+        'score': _score_margin(roe, ROE_LOW, ROE_HIGH),
         'triggered_rules': get_triggered_rules('roe', roe) if roe is not None else [],
     }
 
@@ -332,7 +277,7 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         'value': roa,
         'unit': '%',
         'benchmark': '> 3%（基准）',
-        'score': _score_margin(roa, 0.02, 0.08),
+        'score': _score_margin(roa, ROA_LOW, ROA_HIGH),
         'triggered_rules': [],
     }
 
@@ -347,12 +292,22 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         'triggered_rules': get_triggered_rules('effective_tax_rate', etr) if etr is not None else [],
     }
 
-    # ────────── 现金流 ──────────
+    return metrics
+
+
+def _calculate_cashflow_metrics(f: Dict, fp: Dict) -> Dict:
+    """计算现金流指标"""
+    metrics = {}
+
+    net_profit        = f.get('net_profit', 0) or 0
     operating_cashflow = f.get('operating_cashflow') or 0
     cash_from_sales    = f.get('cash_from_sales', 0) or 0
+    revenue            = f.get('revenue', 0) or 0
+    current_liab       = f.get('current_liabilities', 0) or 0
+    cash               = f.get('cash', 0) or 0
 
     # 若无现金流量表但有利润数据，用间接法估算经营现金流
-    # 担保公司：经营现金流 ≈ 净利润 + 折旧摊销 - 应收款增加
+    cf_is_estimated = False
     if operating_cashflow == 0 and net_profit:
         depreciation = f.get('depreciation', 0) or 0
         amortization = f.get('amortization', 0) or (f.get('long_term_prepaid', 0) or 0) * 0.1
@@ -362,11 +317,8 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         estimated_cf = net_profit + depreciation + amortization - ar_change
         operating_cashflow = estimated_cf
         cf_is_estimated = True
-    else:
-        cf_is_estimated = False
 
     cf_label = '经营活动净现金流（估算）' if cf_is_estimated else '经营活动净现金流'
-
     metrics['operating_cashflow'] = {
         'label': cf_label,
         'value': operating_cashflow,
@@ -409,19 +361,27 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         'triggered_rules': [],
     }
 
-    # ────────── 营运能力 ──────────
+    return metrics
+
+
+def _calculate_operations_metrics(f: Dict) -> Dict:
+    """计算营运能力指标"""
+    metrics = {}
+
+    revenue            = f.get('revenue', 0) or 0
+    total_assets       = f.get('total_assets', 0) or 0
     accounts_receivable = f.get('accounts_receivable', 0) or 0
-    deposit_out = f.get('deposit_out', 0) or 0
+    deposit_out        = f.get('deposit_out', 0) or 0
 
     # 应收账款周转率（担保公司：应收款含存出保证金）
-    effective_ar = accounts_receivable + deposit_out  # 担保公司：应收类资产
+    effective_ar = accounts_receivable + deposit_out
     ar_turnover = safe_div(revenue, effective_ar) if effective_ar > 0 else None
     metrics['ar_turnover'] = {
         'label': '应收/保证金周转率',
         'value': ar_turnover,
         'unit': '次/年',
         'benchmark': '越高越好',
-        'score': _score_turnover(ar_turnover, 1, 3),  # 担保行业低基准
+        'score': _score_turnover(ar_turnover, 1, 3),
         'triggered_rules': [],
     }
 
@@ -447,7 +407,7 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         'triggered_rules': [],
     }
 
-    # 担保专项：净资本充足率（实收资本/总资产）
+    # 担保专项：净资本充足率
     capital_adequacy = safe_div(f.get('paid_in_capital', 0) or 0, total_assets)
     metrics['capital_adequacy'] = {
         'label': '净资本充足率',
@@ -458,8 +418,16 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
         'triggered_rules': [],
     }
 
-    # ────────── 税务合规 ──────────
+    return metrics
+
+
+def _calculate_tax_compliance_metrics(f: Dict, tax: Dict) -> Dict:
+    """计算税务合规指标"""
+    metrics = {}
+
+    revenue   = f.get('revenue', 0) or 0
     vat_sales = tax.get('vat_taxable_sales', 0)
+
     if vat_sales and revenue and vat_sales > 0:
         vat_gap = abs(vat_sales - revenue) / revenue
         metrics['vat_revenue_gap'] = {
@@ -467,11 +435,10 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
             'value': vat_gap,
             'unit': '%',
             'benchmark': '< 15%（正常）',
-            'score': max(0, 100 - vat_gap * 300),
+            'score': max(0, 100 - vat_gap * VAT_GAP_PENALTY_FACTOR),
             'triggered_rules': get_triggered_rules('vat_revenue_gap', vat_gap),
         }
     else:
-        # 无税务申报数据时，税务合规维度给中性分（60分，不扣分不加分）
         metrics['vat_revenue_gap'] = {
             'label': '增值税申报核验',
             'value': None,
@@ -482,12 +449,14 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
             'note': '未提供增值税申报表，无法核验收入一致性',
         }
 
-    # ────────── 跨期趋势分析（当有上期数据时） ──────────
-    if fp:
-        trend_metrics = _calculate_trend_metrics(f, fp)
-        metrics.update(trend_metrics)
+    return metrics
 
-    # ────────── Beneish M-Score（支持双期，精度更高）──────────
+
+def _calculate_fraud_alerts(f: Dict, fp: Optional[Dict]) -> Dict:
+    """计算造假预警指标"""
+    metrics = {}
+
+    # Beneish M-Score
     m_score = _calculate_m_score(f, fp if fp else None)
     if m_score is not None:
         metrics['m_score'] = {
@@ -495,9 +464,55 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
             'value': m_score,
             'unit': '',
             'benchmark': '< -1.78（安全）',
-            'score': 100 if m_score < -2.22 else (50 if m_score < -1.78 else 0),
+            'score': 100 if m_score < MSCORE_SAFE else (50 if m_score < MSCORE_DANGER else 0),
             'triggered_rules': get_triggered_rules('m_score', m_score),
         }
+
+    return metrics
+
+
+# ─────────────────────────────────────────────
+# 主指标计算（重构后）
+# ─────────────────────────────────────────────
+
+def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
+                       fin_prev: Optional[Dict[str, float]] = None) -> Dict:
+    """
+    计算所有分析指标
+    fin: 最新期财务数据
+    tax: 税务数据
+    fin_prev: 上一期财务数据（用于趋势分析，可选）
+    返回：{指标名: {value, score, triggered_rules, ...}}
+    """
+    f = fin
+    fp = fin_prev or {}
+    metrics = {}
+
+    # 数据完整性校验
+    metrics.update(_calculate_data_validation(f))
+
+    # 偿债能力
+    metrics.update(_calculate_solvency_metrics(f))
+
+    # 盈利能力
+    metrics.update(_calculate_profitability_metrics(f, fp))
+
+    # 现金流
+    metrics.update(_calculate_cashflow_metrics(f, fp))
+
+    # 营运能力
+    metrics.update(_calculate_operations_metrics(f))
+
+    # 税务合规
+    metrics.update(_calculate_tax_compliance_metrics(f, tax))
+
+    # 跨期趋势分析
+    if fp:
+        trend_metrics = _calculate_trend_metrics(f, fp)
+        metrics.update(trend_metrics)
+
+    # 造假预警
+    metrics.update(_calculate_fraud_alerts(f, fp))
 
     return metrics
 
@@ -509,18 +524,21 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
 def _calculate_trend_metrics(f_new: Dict, f_old: Dict) -> Dict:
     """
     基于两期数据计算趋势指标
-    2025-12 为旧期（全年），2026-03 为新期（季度）
-    注意：季度收入 × 4 才能与全年对比（需折年化处理）
+
+    重要：f_new / f_old 来自 flatten_financial(use_annualized=True)，
+    季报的流量指标（收入、利润等）已被年化，无需再次乘因子。
     """
     metrics = {}
 
-    def pct(key, annualize_new=False, annualize_factor=4):
-        """计算增长率，annualize_new：新期数值是否需要折年化"""
+    new_factor = f_new.get('_annualization_factor', 1.0)
+
+    def pct(key: str, annualize_new: bool = False, annualize_factor: int = 4) -> Optional[float]:
+        """计算增长率"""
         new_v = f_new.get(key)
         old_v = f_old.get(key)
         if new_v is None or old_v is None or abs(old_v) < 1:
             return None
-        if annualize_new:
+        if annualize_new and new_factor <= 1.0:
             new_v = new_v * annualize_factor
         return (new_v - old_v) / abs(old_v)
 
@@ -532,7 +550,7 @@ def _calculate_trend_metrics(f_new: Dict, f_old: Dict) -> Dict:
             'value': asset_growth,
             'unit': '%',
             'benchmark': '> 0（扩张）',
-            'score': _score_growth(asset_growth, 0, 0.3),
+            'score': _score_growth(asset_growth, GROWTH_NEUTRAL, GROWTH_GOOD),
             'triggered_rules': [],
             'trend_type': True,
         }
@@ -550,15 +568,17 @@ def _calculate_trend_metrics(f_new: Dict, f_old: Dict) -> Dict:
             'trend_type': True,
         }
 
-    # 收入趋势（季度年化 vs 全年）
+    # 收入趋势
     rev_new = f_new.get('revenue')
     rev_old = f_old.get('revenue')
     if rev_new is not None and rev_old is not None and rev_old > 0:
-        # 2026Q1收入 * 4 与2025全年收入对比（隐含年增长率）
-        rev_annualized = rev_new * 4
-        rev_growth_yoy = (rev_annualized - rev_old) / rev_old
+        rev_growth_yoy = (rev_new - rev_old) / rev_old
+        if new_factor > 1.0:
+            label = f'收入年化增速（Q{int(12/new_factor)}折年 vs 全年）'
+        else:
+            label = '收入同比增速'
         metrics['revenue_growth_yoy'] = {
-            'label': '收入年化增速（Q1折年 vs 全年）',
+            'label': label,
             'value': rev_growth_yoy,
             'unit': '%',
             'benchmark': '> 10%（良好）',
@@ -568,14 +588,16 @@ def _calculate_trend_metrics(f_new: Dict, f_old: Dict) -> Dict:
         }
 
     # 利润变化
-    profit_growth = None
     np_new = f_new.get('net_profit')
     np_old = f_old.get('net_profit')
     if np_new is not None and np_old is not None and np_old > 0:
-        profit_annualized = np_new * 4
-        profit_growth = (profit_annualized - np_old) / np_old
+        profit_growth = (np_new - np_old) / np_old
+        if new_factor > 1.0:
+            label = f'利润年化增速（Q{int(12/new_factor)}折年 vs 全年）'
+        else:
+            label = '利润同比增速'
         metrics['profit_growth_yoy'] = {
-            'label': '利润年化增速（Q1折年 vs 全年）',
+            'label': label,
             'value': profit_growth,
             'unit': '%',
             'benchmark': '> 0（持续盈利）',
@@ -593,12 +615,12 @@ def _calculate_trend_metrics(f_new: Dict, f_old: Dict) -> Dict:
         'value': dr_change,
         'unit': '%',
         'benchmark': '< 0（负债率下降）',
-        'score': max(0, 70 - abs(dr_change) * 500) if dr_change > 0 else min(100, 80 + abs(dr_change) * 500),
+        'score': max(0, 70 - abs(dr_change) * DEBT_RATIO_CHANGE_PENALTY) if dr_change > 0 else min(100, 80 + abs(dr_change) * DEBT_RATIO_CHANGE_PENALTY),
         'triggered_rules': [],
         'trend_type': True,
     }
 
-    # 应收账款变化（担保公司：关注存出保证金异常变化）
+    # 应收账款变化
     deposit_change = pct('deposit_out')
     if deposit_change is not None:
         metrics['deposit_out_change'] = {
@@ -606,12 +628,12 @@ def _calculate_trend_metrics(f_new: Dict, f_old: Dict) -> Dict:
             'value': deposit_change,
             'unit': '%',
             'benchmark': '< 30%（稳定）',
-            'score': max(0, 80 - abs(deposit_change) * 100) if abs(deposit_change) > 0.3 else 85,
+            'score': max(0, 80 - abs(deposit_change) * DEPOSIT_CHANGE_PENALTY) if abs(deposit_change) > DEPOSIT_CHANGE_THRESHOLD else 85,
             'triggered_rules': [],
             'trend_type': True,
         }
 
-    # 跨期异常检测（FRAUD-002触发条件）
+    # 跨期异常检测
     cross_period_anomaly = _detect_cross_period_anomaly(f_new, f_old)
     if cross_period_anomaly is not None:
         metrics['cross_period_anomaly'] = {
@@ -630,29 +652,28 @@ def _calculate_trend_metrics(f_new: Dict, f_old: Dict) -> Dict:
 def _detect_cross_period_anomaly(f_new: Dict, f_old: Dict) -> Optional[float]:
     """
     跨期数据倒挂异常检测
-    检查：期末流动资产 < 年初流动资产 × 0.5 等异常
     返回异常度 0~1（0=正常，1=严重异常）
     """
     anomaly_scores = []
 
-    # 检查总资产是否出现大幅下降（正常扩张期不应下降超20%）
+    # 检查总资产是否出现大幅下降
     ta_new = f_new.get('total_assets', 0) or 0
     ta_old = f_old.get('total_assets', 0) or 0
-    if ta_old > 0 and ta_new < ta_old * 0.7:
+    if ta_old > 0 and ta_new < ta_old * ASSET_DECLINE_THRESHOLD:
         anomaly_scores.append(0.8)
     elif ta_old > 0 and ta_new > 0:
         anomaly_scores.append(0.0)
 
-    # 利润与收入增长方向是否一致（Q1折年）
-    rev_new = (f_new.get('revenue') or 0) * 4
+    # 利润与收入增长方向是否一致
+    rev_new = f_new.get('revenue') or 0
     rev_old = f_old.get('revenue') or 0
-    np_new = (f_new.get('net_profit') or 0) * 4
+    np_new = f_new.get('net_profit') or 0
     np_old = f_old.get('net_profit') or 0
     if rev_old > 0 and np_old > 0:
         rev_dir = 1 if rev_new > rev_old else -1
         np_dir = 1 if np_new > np_old else -1
         if rev_dir != np_dir:
-            anomaly_scores.append(0.4)  # 收入利润方向不一致
+            anomaly_scores.append(ANOMALY_SCORE_INCONSISTENT)
         else:
             anomaly_scores.append(0.0)
 
@@ -661,10 +682,6 @@ def _detect_cross_period_anomaly(f_new: Dict, f_old: Dict) -> Optional[float]:
 
 # ─────────────────────────────────────────────
 # Beneish M-Score（完整 8 因子实现）
-# Beneish (1999): M = -4.84 + 0.920*DSRI + 0.528*GMI + 0.404*AQI
-#                      + 0.892*SGI + 0.115*DEPI - 0.172*SGAI
-#                      + 4.679*TATA - 0.327*LVGI
-# 阈值：> -1.78 表示财务造假风险高，> -2.22 表示中等风险
 # ─────────────────────────────────────────────
 
 def _calculate_m_score(f: Dict, f_prev: Optional[Dict] = None) -> Optional[float]:
@@ -680,8 +697,6 @@ def _calculate_m_score(f: Dict, f_prev: Optional[Dict] = None) -> Optional[float
         cost  = f.get('cost_of_sales') or 0
         ta    = f.get('total_assets') or 1
         fa    = f.get('fixed_assets') or f.get('fixed_assets_gross') or 0
-        pp    = f.get('long_term_prepaid') or 0          # 其他资产（AQI代理）
-        depr  = f.get('depreciation') or 0               # 折旧
         sga   = (f.get('selling_expense') or 0) + (f.get('admin_expense') or 0)
         tl    = f.get('total_liabilities') or 0
         te    = f.get('total_equity') or (ta - tl)
@@ -694,8 +709,7 @@ def _calculate_m_score(f: Dict, f_prev: Optional[Dict] = None) -> Optional[float
         gp    = rev - cost
         gross_margin = gp / rev
 
-        # ── 单期可计算的因子（无上期数据时设为中性值）──
-        # TATA: 应计利润比率（总资产应计项目）
+        # TATA: 应计利润比率
         tata = (np - ocf) / ta
 
         if f_prev:
@@ -704,7 +718,6 @@ def _calculate_m_score(f: Dict, f_prev: Optional[Dict] = None) -> Optional[float
             cost0 = f_prev.get('cost_of_sales') or 0
             ta0   = f_prev.get('total_assets') or 1
             fa0   = f_prev.get('fixed_assets') or f_prev.get('fixed_assets_gross') or 0
-            pp0   = f_prev.get('long_term_prepaid') or 0
             depr0 = f_prev.get('depreciation') or 0
             sga0  = (f_prev.get('selling_expense') or 0) + (f_prev.get('admin_expense') or 0)
             tl0   = f_prev.get('total_liabilities') or 0
@@ -712,37 +725,38 @@ def _calculate_m_score(f: Dict, f_prev: Optional[Dict] = None) -> Optional[float
             gp0   = rev0 - cost0
             gm0   = gp0 / rev0 if rev0 else 0
 
-            # DSRI: 应收账款增速 / 收入增速（>1 表示应收增长快于收入，收入质量下降）
+            # DSRI: 应收账款指数
             dsri = (ar / rev) / (ar0 / rev0) if ar0 > 0 else (ar / rev + 1)
 
-            # GMI: 毛利率指数（>1 表示毛利率下降）
+            # GMI: 毛利率指数
             gmi = gm0 / gross_margin if gross_margin > 0 else 1.0
 
-            # AQI: 资产质量指数（非流动非固定资产占比变化）
+            # AQI: 资产质量指数
             aqi_curr = 1 - (fa + (f.get('current_assets') or 0)) / ta
             aqi_prev = 1 - (fa0 + (f_prev.get('current_assets') or 0)) / ta0
             aqi = aqi_curr / aqi_prev if aqi_prev > 0 else 1.0
 
-            # SGI: 营收增长指数（>1 表示高增长，可能有激励造假）
+            # SGI: 营收增长指数
             sgi = rev / rev0 if rev0 > 0 else 1.0
 
-            # DEPI: 折旧指数（>1 表示折旧减少，可能低估资产损耗）
+            # DEPI: 折旧指数
+            depr = f.get('depreciation') or 0
             dep_rate0 = depr0 / (fa0 + depr0) if (fa0 + depr0) > 0 else 0
             dep_rate  = depr / (fa + depr) if (fa + depr) > 0 else dep_rate0
             depi = dep_rate0 / dep_rate if dep_rate > 0 else 1.0
 
-            # SGAI: 销售管理费用指数（>1 表示费用增速快于收入）
+            # SGAI: 销售管理费用指数
             sgai = (sga / rev) / (sga0 / rev0) if (sga0 > 0 and rev0 > 0) else 1.0
 
-            # LVGI: 杠杆指数（>1 表示负债增加）
+            # LVGI: 杠杆指数
             lev_curr = tl / (tl + te) if (tl + te) > 0 else 0
             lev_prev = tl0 / (tl0 + te0) if (tl0 + te0) > 0 else 0
             lvgi = lev_curr / lev_prev if lev_prev > 0 else 1.0
 
         else:
-            # 无上期数据：使用保守中性值，仅 DSRI / TATA 可单期估算
-            dsri = (ar / rev) / 0.1 if rev > 0 else 1.0   # 假设历史AR/Rev = 10%
-            dsri = min(dsri, 3.0)                            # 防止极端值
+            # 无上期数据：使用保守中性值
+            dsri = (ar / rev) / ASSUMED_AR_REVENUE_RATIO if rev > 0 else 1.0
+            dsri = min(dsri, DSRI_CAP)
             gmi  = 1.0
             aqi  = 1.0
             sgi  = 1.0
@@ -750,15 +764,16 @@ def _calculate_m_score(f: Dict, f_prev: Optional[Dict] = None) -> Optional[float
             sgai = 1.0
             lvgi = 1.0
 
-        m = (-4.84
-             + 0.920 * dsri
-             + 0.528 * gmi
-             + 0.404 * aqi
-             + 0.892 * sgi
-             + 0.115 * depi
-             - 0.172 * sgai
-             + 4.679 * tata
-             - 0.327 * lvgi)
+        # 计算 M-Score
+        m = (BENEISH_COEFFICIENTS['intercept']
+             + BENEISH_COEFFICIENTS['dsri'] * dsri
+             + BENEISH_COEFFICIENTS['gmi'] * gmi
+             + BENEISH_COEFFICIENTS['aqi'] * aqi
+             + BENEISH_COEFFICIENTS['sgi'] * sgi
+             + BENEISH_COEFFICIENTS['depi'] * depi
+             + BENEISH_COEFFICIENTS['sgai'] * sgai
+             + BENEISH_COEFFICIENTS['tata'] * tata
+             + BENEISH_COEFFICIENTS['lvgi'] * lvgi)
 
         return round(m, 3)
     except Exception:
@@ -766,86 +781,70 @@ def _calculate_m_score(f: Dict, f_prev: Optional[Dict] = None) -> Optional[float
 
 
 # ─────────────────────────────────────────────
-# 评分函数（0-100，sigmoid 平滑，无硬边界突变）
+# 评分函数（0-100，sigmoid 平滑）
 # ─────────────────────────────────────────────
 
-def _score_current_ratio(v):
-    """流动比率：center=2.0（担保公司通常极高，上限软化）"""
-    if v is None: return 50
-    # 担保公司流动比率 5~30 属正常，不应过度加分
-    capped = min(v, 15.0)
-    return _sigmoid_score(capped, center=2.0, steepness=6.0)
+def _create_sigmoid_scorer(center: float, steepness: float = 8.0,
+                           direction: str = 'higher_is_better',
+                           cap: Optional[float] = None,
+                           default: float = 50.0):
+    """评分函数工厂"""
+    def scorer(v: Optional[float]) -> float:
+        if v is None:
+            return default
+        if cap is not None:
+            v = min(v, cap)
+        return _sigmoid_score(v, center=center, steepness=steepness, direction=direction)
+    return scorer
 
 
-def _score_quick_ratio(v):
-    """速动比率：center=1.2"""
-    if v is None: return 50
-    capped = min(v, 12.0)
-    return _sigmoid_score(capped, center=1.2, steepness=7.0)
+# 使用工厂创建评分函数
+_score_current_ratio = _create_sigmoid_scorer(CURRENT_RATIO_CENTER, CURRENT_RATIO_STEEPNESS, cap=CURRENT_RATIO_CAP)
+_score_quick_ratio = _create_sigmoid_scorer(QUICK_RATIO_CENTER, QUICK_RATIO_STEEPNESS, cap=QUICK_RATIO_CAP)
+_score_debt_ratio = _create_sigmoid_scorer(DEBT_RATIO_CENTER, DEBT_RATIO_STEEPNESS, direction='lower_is_better')
+_score_icr = _create_sigmoid_scorer(ICR_CENTER, ICR_STEEPNESS, cap=ICR_CAP, default=60.0)
+_score_cash_ratio = _create_sigmoid_scorer(CASH_RATIO_CENTER, CASH_RATIO_STEEPNESS, cap=CASH_RATIO_CAP)
+_score_ar_days_guarantee = _create_sigmoid_scorer(365.0, 2.0, direction='lower_is_better', default=60.0)
 
 
-def _score_debt_ratio(v):
-    """资产负债率：越低越好，center=0.55（55%为拐点）"""
-    if v is None: return 50
-    return _sigmoid_score(v, center=0.55, steepness=8.0, direction='lower_is_better')
-
-
-def _score_icr(v):
-    """利息保障倍数：center=3.0"""
-    if v is None: return 60   # 担保公司无有息负债时给中等分
-    capped = min(v, 30.0)
-    return _sigmoid_score(capped, center=3.0, steepness=5.0)
-
-
-def _score_margin(v, low, high):
-    """通用利润率/比率评分，center 取 (low+high)/2"""
-    if v is None: return 50
+def _score_margin(v: Optional[float], low: float, high: float) -> float:
+    """通用利润率/比率评分"""
+    if v is None:
+        return 50
     center = (low + high) / 2.0
     return _sigmoid_score(v, center=center, steepness=8.0)
 
 
-def _score_cashflow(v):
-    """经营净现金流：正为好，以总资产1%为拐点"""
-    if v is None: return 50
-    # 用万元归一化，避免绝对金额影响斜率
-    v_norm = v / 1e4
+def _score_cashflow(v: Optional[float]) -> float:
+    """经营净现金流评分"""
+    if v is None:
+        return 50
+    v_norm = v / 1e4  # 用万元归一化
     return _sigmoid_score(v_norm, center=0.0, steepness=0.3)
 
 
-def _score_cash_ratio(v):
-    """现金比率：center=0.4（担保公司可略高）"""
-    if v is None: return 50
-    capped = min(v, 5.0)
-    return _sigmoid_score(capped, center=0.4, steepness=6.0)
+def _score_tax_rate(v: Optional[float]) -> float:
+    """有效税率评分"""
+    if v is None:
+        return 60
+    deviation = abs(v - TAX_RATE_OPTIMAL)
+    return max(0.0, round(100.0 - deviation * TAX_RATE_PENALTY, 1))
 
 
-def _score_tax_rate(v):
-    """有效税率：15%-25% 最优，过低过高均扣分"""
-    if v is None: return 60
-    # 最优区间中心 = 0.20
-    optimal = 0.20
-    deviation = abs(v - optimal)
-    return max(0.0, round(100.0 - deviation * 300, 1))
-
-
-def _score_turnover(v, low, high):
-    """周转率：center = (low + high) / 2"""
-    if v is None: return 50
+def _score_turnover(v: Optional[float], low: float, high: float) -> float:
+    """周转率评分"""
+    if v is None:
+        return 50
     center = (low + high) / 2.0
-    return _sigmoid_score(v, center=center, steepness=5.0)
+    return _sigmoid_score(v, center=center, steepness=TURNOVER_STEEPNESS)
 
 
-def _score_ar_days_guarantee(v):
-    """担保保证金周转天数：越短越好，center=365天"""
-    if v is None: return 60
-    return _sigmoid_score(v, center=365.0, steepness=2.0, direction='lower_is_better')
-
-
-def _score_growth(v, low, high):
-    """增长率评分：center = (low + high) / 2"""
-    if v is None: return 50
+def _score_growth(v: Optional[float], low: float, high: float) -> float:
+    """增长率评分"""
+    if v is None:
+        return 50
     center = (low + high) / 2.0 if (low + high) != 0 else 0.1
-    return _sigmoid_score(v, center=center, steepness=10.0)
+    return _sigmoid_score(v, center=center, steepness=GROWTH_STEEPNESS)
 
 
 # ─────────────────────────────────────────────
@@ -863,6 +862,7 @@ DIMENSION_METRIC_MAP = {
 
 
 def compute_dimension_score(metrics: Dict, dimension: str) -> float:
+    """计算单个维度的得分"""
     keys = DIMENSION_METRIC_MAP.get(dimension, [])
     scores = [metrics[k]['score'] for k in keys if k in metrics and metrics[k].get('score') is not None]
     if not scores:
@@ -871,6 +871,7 @@ def compute_dimension_score(metrics: Dict, dimension: str) -> float:
 
 
 def compute_total_score(metrics: Dict, industry: str = '通用') -> Dict:
+    """计算综合评分"""
     weights = INDUSTRY_WEIGHTS.get(industry, INDUSTRY_WEIGHTS['通用'])
     dim_scores = {}
     for dim in weights:
@@ -878,7 +879,7 @@ def compute_total_score(metrics: Dict, industry: str = '通用') -> Dict:
 
     # 造假预警一票否决
     m_score_val = metrics.get('m_score', {}).get('value')
-    veto = m_score_val is not None and m_score_val > -1.78
+    veto = m_score_val is not None and m_score_val > MSCORE_DANGER
 
     if veto:
         total = 0.0

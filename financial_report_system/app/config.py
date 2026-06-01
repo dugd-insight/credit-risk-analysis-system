@@ -124,7 +124,7 @@ class CacheConfig:
     # 缓存策略
     cache_strategy: str = "no-cache"
     # 版本号（用于缓存破坏）
-    version: str = "2.1.2"
+    version: str = "3.0"
 
 
 class Config:
@@ -181,7 +181,7 @@ class Config:
 
         self.cache = CacheConfig(
             enabled=os.getenv("CACHE_ENABLED", "true").lower() == "true",
-            version=os.getenv("APP_VERSION", "2.1.2"),
+            version=os.getenv("APP_VERSION", "3.0"),
         )
 
         # 确保必要目录存在

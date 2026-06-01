@@ -3,665 +3,624 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>信贷风险分析系统 v2.1.2</title>
+    <title>信贷风险分析系统 v3.0</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-card: rgba(255,255,255,0.04);
+            --bg-card-hover: rgba(255,255,255,0.06);
+            --border: rgba(255,255,255,0.08);
+            --border-focus: rgba(99,102,241,0.6);
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent: #818cf8;
+            --accent-glow: rgba(129,140,248,0.15);
+            --success: #34d399;
+            --danger: #f87171;
+            --warning: #fbbf24;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--bg-primary);
             min-height: 100vh;
-            padding: 40px 20px;
-        }
-        .container {
-            max-width: 700px;
-            margin: 0 auto;
-        }
-        .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 40px;
-        }
-        .header h1 {
-            font-size: 32px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        .header p {
-            font-size: 16px;
-            opacity: 0.9;
-        }
-        .card {
-            background: white;
-            border-radius: 16px;
-            padding: 40px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-        }
-        .form-group {
-            margin-bottom: 24px;
-        }
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-            color: #333;
-            font-size: 14px;
-        }
-        input[type="text"], select {
-            width: 100%;
-            padding: 14px 16px;
-            border: 2px solid #e5e7eb;
-            border-radius: 10px;
-            font-size: 15px;
-            transition: border-color 0.2s;
-        }
-        input[type="text"]:focus, select:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        .file-upload {
-            position: relative;
-            display: block;
-        }
-        .file-upload input {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            opacity: 0;
-            cursor: pointer;
-        }
-        .file-upload-area {
-            padding: 40px 20px;
-            border: 2px dashed #d1d5db;
-            border-radius: 10px;
-            text-align: center;
-            transition: all 0.2s;
-            background: #f9fafb;
-        }
-        .file-upload:hover .file-upload-area {
-            border-color: #667eea;
-            background: #f0f0ff;
-        }
-        .file-upload-area .icon {
-            font-size: 40px;
-            margin-bottom: 10px;
-        }
-        .file-upload-area .text {
-            color: #6b7280;
-            font-size: 14px;
-        }
-        .file-upload-area .text strong {
-            color: #667eea;
-        }
-        .file-list {
-            margin-top: 12px;
-        }
-        .file-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 14px;
-            background: #f0f0ff;
-            border-radius: 8px;
-            margin-bottom: 8px;
-            font-size: 13px;
-        }
-        .file-item .name {
-            color: #333;
-            flex: 1;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .file-item .remove {
-            color: #dc2626;
-            cursor: pointer;
-            margin-left: 10px;
-        }
-        .btn {
-            width: 100%;
-            padding: 16px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
-        }
-        .btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        .note {
-            font-size: 12px;
-            color: #9ca3af;
-            margin-top: 6px;
-        }
-        .error {
-            background: #fef2f2;
-            color: #dc2626;
-            padding: 15px;
-            border-radius: 10px;
-            margin-top: 15px;
-            display: none;
-        }
-        .error.show {
-            display: block;
+            color: var(--text-primary);
+            overflow-x: hidden;
         }
 
-        /* 分析进度区域 */
-        .progress-area {
-            margin-top: 30px;
-            display: none;
+        /* 动态背景 */
+        .bg-layer {
+            position: fixed; inset: 0; z-index: 0; pointer-events: none;
+            background:
+                radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99,102,241,0.12) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 50% at 80% 80%, rgba(168,85,247,0.08) 0%, transparent 60%),
+                radial-gradient(ellipse 50% 40% at 50% 50%, rgba(59,130,246,0.06) 0%, transparent 60%);
         }
-        .progress-area.show {
-            display: block;
+        .bg-grid {
+            position: fixed; inset: 0; z-index: 0; pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 60px 60px;
+            mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 20%, transparent 70%);
         }
-        .progress-card {
-            background: white;
+
+        .page { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
+
+        /* 顶部导航 */
+        .topbar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 20px 40px;
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(20px);
+            background: rgba(10,14,26,0.8);
+            position: sticky; top: 0; z-index: 10;
+        }
+        .topbar-brand {
+            display: flex; align-items: center; gap: 12px;
+        }
+        .topbar-logo {
+            width: 36px; height: 36px; border-radius: 10px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; box-shadow: 0 0 20px rgba(99,102,241,0.3);
+        }
+        .topbar-title { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; }
+        .topbar-version {
+            font-size: 10px; color: var(--accent); background: var(--accent-glow);
+            padding: 2px 8px; border-radius: 6px; font-weight: 500; letter-spacing: 1px;
+        }
+        .topbar-status {
+            display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted);
+        }
+        .status-dot {
+            width: 6px; height: 6px; border-radius: 50%; background: var(--success);
+            box-shadow: 0 0 8px rgba(52,211,153,0.5);
+        }
+
+        /* 主内容 */
+        .main {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            padding: 40px 20px;
+        }
+        .panel {
+            width: 100%; max-width: 520px;
+        }
+
+        /* 标题区 */
+        .hero { text-align: center; margin-bottom: 40px; }
+        .hero-icon {
+            width: 64px; height: 64px; margin: 0 auto 20px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15));
+            border: 1px solid rgba(99,102,241,0.2);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px;
+            box-shadow: 0 0 40px rgba(99,102,241,0.1);
+        }
+        .hero h1 {
+            font-size: 24px; font-weight: 600; margin-bottom: 8px;
+            background: linear-gradient(135deg, #e2e8f0, #94a3b8);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .hero p { font-size: 14px; color: var(--text-muted); }
+
+        /* 表单卡片 */
+        .form-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+        }
+
+        .field { margin-bottom: 20px; }
+        .field-label {
+            display: block; font-size: 12px; font-weight: 500;
+            color: var(--text-secondary); margin-bottom: 8px;
+            text-transform: uppercase; letter-spacing: 0.8px;
+        }
+        .field-input {
+            width: 100%; padding: 12px 14px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border);
+            border-radius: 10px; font-size: 14px;
+            color: var(--text-primary);
+            transition: all 0.2s;
+            outline: none;
+        }
+        .field-input:focus {
+            border-color: var(--border-focus);
+            background: rgba(99,102,241,0.04);
+            box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+        }
+        .field-input::placeholder { color: var(--text-muted); }
+        select.field-input {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 14px center;
+            padding-right: 36px;
+        }
+        select.field-input option { background: #1e293b; color: #e2e8f0; }
+
+        /* 文件上传区 */
+        .upload-zone {
+            position: relative;
+            border: 1.5px dashed rgba(255,255,255,0.1);
             border-radius: 12px;
-            padding: 24px;
+            padding: 32px 20px;
             text-align: center;
+            cursor: pointer;
+            transition: all 0.25s;
+            background: rgba(255,255,255,0.02);
         }
-        .progress-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--accent);
+            background: var(--accent-glow);
+            box-shadow: 0 0 30px rgba(99,102,241,0.08);
         }
-        .progress-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 16px;
+        .upload-zone input[type="file"] {
+            position: absolute; inset: 0; opacity: 0; cursor: pointer;
         }
-        .progress-bar-container {
-            background: #e5e7eb;
-            border-radius: 10px;
-            height: 10px;
-            overflow: hidden;
-            margin-bottom: 12px;
+        .upload-icon {
+            width: 48px; height: 48px; margin: 0 auto 12px;
+            border-radius: 12px;
+            background: rgba(99,102,241,0.1);
+            border: 1px solid rgba(99,102,241,0.15);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px;
         }
-        .progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            border-radius: 10px;
-            transition: width 0.3s ease;
-            width: 0%;
+        .upload-text { font-size: 13px; color: var(--text-secondary); }
+        .upload-text strong { color: var(--accent); font-weight: 500; }
+        .upload-hint { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+
+        /* 文件列表 */
+        .file-list { margin-top: 12px; }
+        .file-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 14px; margin-bottom: 6px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border);
+            border-radius: 8px; font-size: 13px;
+        }
+        .file-icon {
+            width: 28px; height: 28px; border-radius: 6px;
+            background: rgba(99,102,241,0.1);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; flex-shrink: 0;
+        }
+        .file-name { flex: 1; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-size { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+
+        /* 提交按钮 */
+        .btn-submit {
+            width: 100%; padding: 14px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white; border: none; border-radius: 10px;
+            font-size: 15px; font-weight: 600;
+            cursor: pointer; transition: all 0.25s;
+            letter-spacing: 0.5px;
+            position: relative; overflow: hidden;
+        }
+        .btn-submit:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 30px rgba(99,102,241,0.35);
+        }
+        .btn-submit:active { transform: translateY(0); }
+        .btn-submit:disabled {
+            background: rgba(255,255,255,0.06); color: var(--text-muted);
+            cursor: not-allowed; transform: none; box-shadow: none;
+        }
+        .btn-submit .shimmer {
+            position: absolute; inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            transform: translateX(-100%);
+        }
+        .btn-submit:not(:disabled):hover .shimmer {
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer {
+            100% { transform: translateX(100%); }
+        }
+
+        /* 进度区 */
+        .progress-section {
+            margin-top: 24px; display: none;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 12px; padding: 24px;
+        }
+        .progress-section.show { display: block; }
+        .progress-header {
+            display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+        }
+        .progress-spinner {
+            width: 32px; height: 32px; border-radius: 50%;
+            border: 2px solid rgba(99,102,241,0.2);
+            border-top-color: var(--accent);
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .progress-title { font-size: 14px; font-weight: 500; }
+        .progress-track {
+            height: 4px; background: rgba(255,255,255,0.06);
+            border-radius: 2px; overflow: hidden; margin-bottom: 12px;
+        }
+        .progress-fill {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+            border-radius: 2px; transition: width 0.4s ease;
         }
         .progress-steps {
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            color: #666;
+            display: flex; gap: 4px; font-size: 11px;
         }
-        .progress-step {
-            text-align: center;
-            flex: 1;
-            padding: 8px 4px;
-            opacity: 0.4;
+        .p-step {
+            flex: 1; text-align: center; padding: 6px 2px;
+            color: var(--text-muted); border-radius: 6px;
             transition: all 0.3s;
         }
-        .progress-step.active {
-            opacity: 1;
-            color: #667eea;
-            font-weight: 600;
-        }
-        .progress-step.done {
-            opacity: 1;
-            color: #22c55e;
-        }
-        .progress-detail {
-            font-size: 13px;
-            color: #666;
-            margin-top: 10px;
+        .p-step.active { color: var(--accent); background: var(--accent-glow); font-weight: 500; }
+        .p-step.done { color: var(--success); }
+        .progress-msg {
+            margin-top: 10px; font-size: 12px; color: var(--text-muted); text-align: center;
         }
 
-        /* 结果展示区域 */
-        .result {
-            margin-top: 30px;
-            display: none;
+        /* 结果区 */
+        .result-section {
+            margin-top: 24px; display: none;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 12px; padding: 28px;
         }
-        .result.show {
-            display: block;
+        .result-section.show { display: block; }
+        .result-top {
+            display: flex; align-items: center; gap: 16px; margin-bottom: 20px;
         }
-        .result h3 {
-            color: #1e40af;
-            margin-bottom: 15px;
-            font-size: 18px;
+        .result-badge {
+            width: 56px; height: 56px; border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; font-weight: 700;
+            background: rgba(52,211,153,0.1); color: var(--success);
+            border: 1px solid rgba(52,211,153,0.2);
         }
-        .result .summary {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
+        .result-info h3 { font-size: 18px; font-weight: 600; margin-bottom: 2px; }
+        .result-info p { font-size: 13px; color: var(--text-muted); }
+        .result-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;
         }
-        .result .summary-item {
-            background: #f9fafb;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
+        .result-metric {
+            background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+            border-radius: 10px; padding: 14px;
         }
-        .result .summary-item .label {
-            font-size: 12px;
-            color: #6b7280;
-            margin-bottom: 5px;
+        .result-metric .label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .result-metric .value { font-size: 20px; font-weight: 600; }
+        .result-suggestion {
+            background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.15);
+            border-radius: 10px; padding: 14px; font-size: 13px; color: var(--success);
+            margin-bottom: 20px;
         }
-        .result .summary-item .value {
-            font-size: 24px;
-            font-weight: 600;
-            color: #1f2937;
+        .result-btns { display: flex; gap: 10px; }
+        .btn-action {
+            flex: 1; padding: 12px; border-radius: 10px; font-size: 13px;
+            font-weight: 500; text-align: center; text-decoration: none;
+            transition: all 0.2s; cursor: pointer; border: none;
         }
-        .result .summary-item .grade {
-            font-size: 32px;
-            font-weight: 700;
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-primary:hover { box-shadow: 0 4px 20px rgba(99,102,241,0.3); }
+        .btn-ghost {
+            background: rgba(255,255,255,0.04); color: var(--text-secondary);
+            border: 1px solid var(--border);
         }
-        .result .summary-item .grade.grade-aaa { color: #059669; }
-        .result .summary-item .grade.grade-aa { color: #10b981; }
-        .result .summary-item .grade.grade-a { color: #34d399; }
-        .result .summary-item .grade.grade-bbb { color: #f59e0b; }
-        .result .summary-item .grade.grade-bb { color: #f97316; }
-        .result .summary-item .grade.grade-b { color: #ef4444; }
-        .result .summary-item .grade.grade-ccc { color: #dc2626; }
-        .result .suggestion {
-            background: #f0fdf4;
-            border: 1px solid #bbf7d0;
-            padding: 12px 16px;
-            border-radius: 8px;
-            margin-top: 15px;
-            font-size: 14px;
-            color: #166534;
+        .btn-ghost:hover { background: rgba(255,255,255,0.08); }
+
+        /* 错误区 */
+        .error-section {
+            margin-top: 16px; display: none;
+            background: rgba(248,113,113,0.06); border: 1px solid rgba(248,113,113,0.15);
+            border-radius: 10px; padding: 14px;
+            font-size: 13px; color: var(--danger);
         }
-        .result .btn-group {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 20px;
-            justify-content: center;
-        }
-        .result .download-btn {
-            display: inline-block;
-            padding: 14px 24px;
-            background: #1f2937;
-            color: white;
-            text-align: center;
-            border-radius: 10px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: background 0.2s;
-        }
-        .result .download-btn.pdf {
-            background: #dc2626;
-        }
-        .result .download-btn.pdf:hover {
-            background: #b91c1c;
-        }
-        .result .download-btn:hover {
-            background: #374151;
+        .error-section.show { display: block; }
+
+        /* 底部 */
+        .footer {
+            text-align: center; padding: 20px;
+            font-size: 11px; color: var(--text-muted);
+            border-top: 1px solid var(--border);
         }
 
-        /* 动画 */
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .spinning {
-            animation: spin 1s linear infinite;
+        /* 响应式 */
+        @media (max-width: 560px) {
+            .topbar { padding: 16px 20px; }
+            .form-card { padding: 24px 20px; }
+            .result-grid { grid-template-columns: 1fr; }
+            .result-btns { flex-direction: column; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🏦 信贷风险分析系统</h1>
-            <p>上传财务报表，智能分析企业信用风险</p>
-        </div>
+    <div class="bg-layer"></div>
+    <div class="bg-grid"></div>
 
-        <div class="card">
-            <form id="analyzeForm">
-                <div class="form-group">
-                    <label>企业名称</label>
-                    <input type="text" name="company_name" id="companyName" required placeholder="请输入企业全称">
+    <div class="page">
+        <!-- 顶部导航 -->
+        <nav class="topbar">
+            <div class="topbar-brand">
+                <div class="topbar-logo">🏦</div>
+                <span class="topbar-title">信贷风险分析系统</span>
+                <span class="topbar-version">v3.0</span>
+            </div>
+            <div class="topbar-status">
+                <span class="status-dot"></span>
+                <span>服务运行中</span>
+                <span style="margin-left:8px" id="topStatus"></span>
+            </div>
+        </nav>
+
+        <!-- 主内容 -->
+        <div class="main">
+            <div class="panel">
+                <!-- 标题 -->
+                <div class="hero">
+                    <div class="hero-icon">📊</div>
+                    <h1>企业信用风险评估</h1>
+                    <p>上传财务报表，智能分析六大维度，生成专业授信决策报告</p>
                 </div>
 
-                <div class="form-group">
-                    <label>行业分类</label>
-                    <select name="industry" id="industry" required>
-                        <option value="担保/金融服务">担保/金融服务</option>
-                        <option value="制造业">制造业</option>
-                        <option value="零售/批发">零售/批发</option>
-                        <option value="建筑/地产">建筑/地产</option>
-                        <option value="农业/食品">农业/食品</option>
-                        <option value="通用">通用</option>
-                    </select>
-                </div>
+                <!-- 表单 -->
+                <div class="form-card">
+                    <form id="analyzeForm">
+                        <div class="field">
+                            <label class="field-label">企业名称</label>
+                            <input type="text" class="field-input" name="company_name" id="companyName"
+                                   required placeholder="请输入企业全称" autocomplete="off">
+                        </div>
 
-                <div class="form-group">
-                    <label>上传财务报表</label>
-                    <div class="file-upload">
-                        <input type="file" name="files" id="fileInput" multiple accept=".xls,.xlsx" required>
-                        <div class="file-upload-area">
-                            <div class="icon">📁</div>
-                            <div class="text">
-                                <strong>点击选择文件</strong> 或拖拽文件到此处<br>
-                                支持 .xls、.xlsx 格式
+                        <div class="field">
+                            <label class="field-label">行业分类</label>
+                            <select class="field-input" name="industry" id="industry" required>
+                                <option value="担保/金融服务">担保/金融服务</option>
+                                <option value="制造业">制造业</option>
+                                <option value="零售/批发">零售/批发</option>
+                                <option value="建筑/地产">建筑/地产</option>
+                                <option value="农业/食品">农业/食品</option>
+                                <option value="通用">通用</option>
+                            </select>
+                        </div>
+
+                        <div class="field">
+                            <label class="field-label">财务报表文件</label>
+                            <div class="upload-zone" id="uploadZone">
+                                <input type="file" name="files" id="fileInput" multiple accept=".xls,.xlsx" required>
+                                <div class="upload-icon">📁</div>
+                                <div class="upload-text">
+                                    <strong>选择文件</strong> 或拖拽到此处
+                                </div>
+                                <div class="upload-hint">支持 .xls / .xlsx，可多选多期报表</div>
+                            </div>
+                            <div class="file-list" id="fileList"></div>
+                        </div>
+
+                        <button type="submit" class="btn-submit" id="submitBtn">
+                            <span class="shimmer"></span>
+                            <span id="btnText">开始分析</span>
+                        </button>
+                    </form>
+
+                    <!-- 错误 -->
+                    <div class="error-section" id="errorMsg"></div>
+
+                    <!-- 进度 -->
+                    <div class="progress-section" id="progressSection">
+                        <div class="progress-header">
+                            <div class="progress-spinner" id="progressSpinner"></div>
+                            <div class="progress-title" id="progressTitle">正在上传文件...</div>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="progressBar"></div>
+                        </div>
+                        <div class="progress-steps">
+                            <div class="p-step" id="step0">上传</div>
+                            <div class="p-step" id="step1">解析</div>
+                            <div class="p-step" id="step2">分析</div>
+                            <div class="p-step" id="step3">报告</div>
+                        </div>
+                        <div class="progress-msg" id="progressMsg"></div>
+                    </div>
+
+                    <!-- 结果 -->
+                    <div class="result-section" id="resultSection">
+                        <div class="result-top">
+                            <div class="result-badge" id="resultGrade">-</div>
+                            <div class="result-info">
+                                <h3 id="resultTitle">分析完成</h3>
+                                <p id="resultSub">-</p>
                             </div>
                         </div>
+                        <div class="result-grid">
+                            <div class="result-metric">
+                                <div class="label">综合评分</div>
+                                <div class="value" id="resultScore">-</div>
+                            </div>
+                            <div class="result-metric">
+                                <div class="label">信用等级</div>
+                                <div class="value" id="resultGradeVal">-</div>
+                            </div>
+                        </div>
+                        <div class="result-suggestion" id="resultSuggestion">-</div>
+                        <div class="result-btns">
+                            <a href="#" class="btn-action btn-primary" id="btnViewReport">查看报告</a>
+                            <a href="#" class="btn-action btn-ghost" id="btnNewAnalysis">重新分析</a>
+                        </div>
                     </div>
-                    <div class="file-list" id="fileList"></div>
-                    <div class="note">支持多期数据同时上传，系统会自动识别并对比分析</div>
-                </div>
-
-                <button type="submit" class="btn" id="submitBtn">🔍 开始分析</button>
-            </form>
-
-            <div class="error" id="errorMsg"></div>
-
-            <!-- 分析进度区域 -->
-            <div class="progress-area" id="progressArea">
-                <div class="progress-card">
-                    <div class="progress-icon" id="progressIcon">⏳</div>
-                    <div class="progress-title" id="progressTitle">正在上传文件...</div>
-                    <div class="progress-bar-container">
-                        <div class="progress-bar" id="progressBar"></div>
-                    </div>
-                    <div class="progress-steps">
-                        <div class="progress-step" id="step1">📤 上传</div>
-                        <div class="progress-step" id="step2">📊 分析</div>
-                        <div class="progress-step" id="step3">📄 生成报告</div>
-                        <div class="progress-step" id="step4">📥 导出</div>
-                    </div>
-                    <div class="progress-detail" id="progressDetail"></div>
                 </div>
             </div>
+        </div>
 
-            <!-- 结果展示区域 -->
-            <div class="result" id="resultArea">
-                <h3>✅ 分析完成！</h3>
-                <div class="summary">
-                    <div class="summary-item">
-                        <div class="label">信用等级</div>
-                        <div class="value grade" id="resultGrade">-</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="label">综合评分</div>
-                        <div class="value" id="resultScore">-</div>
-                    </div>
-                    <div class="summary-item" style="grid-column: span 2;">
-                        <div class="label">授信建议</div>
-                        <div class="value" style="font-size: 16px;" id="resultSuggestion">-</div>
-                    </div>
-                </div>
-                <div class="suggestion" id="resultDetail" style="display: none;"></div>
-                <div class="btn-group">
-                    <a href="#" class="download-btn" id="downloadHtmlBtn">📄 查看网页报告</a>
-                    <a href="#" class="download-btn pdf" id="downloadPdfBtn">📥 下载PDF报告</a>
-                    <a href="#" class="download-btn" id="newAnalysisBtn">🔄 新建分析</a>
-                </div>
-            </div>
+        <div class="footer">
+            信贷风险分析系统 v3.0 · 六维评分 · Beneish M-Score · 行业差异化权重
         </div>
     </div>
 
     <script>
-        // DOM 元素
         const fileInput = document.getElementById('fileInput');
         const fileList = document.getElementById('fileList');
         const form = document.getElementById('analyzeForm');
         const submitBtn = document.getElementById('submitBtn');
-        const errorMsg = document.getElementById('errorMsg');
-        const progressArea = document.getElementById('progressArea');
-        const resultArea = document.getElementById('resultArea');
-
-        // 轮询间隔（毫秒）
-        const POLL_INTERVAL = 1000;
+        const btnText = document.getElementById('btnText');
+        const uploadZone = document.getElementById('uploadZone');
         let pollTimer = null;
 
-        // 显示已选文件
-        fileInput.addEventListener('change', function() {
-            fileList.innerHTML = '';
-            Array.from(this.files).forEach(file => {
-                const item = document.createElement('div');
-                item.className = 'file-item';
-                item.innerHTML = `
-                    <span class="name">📊 ${file.name}</span>
-                `;
-                fileList.appendChild(item);
-            });
+        // 拖拽效果
+        ['dragenter','dragover'].forEach(e => {
+            uploadZone.addEventListener(e, ev => { ev.preventDefault(); uploadZone.classList.add('dragover'); });
+        });
+        ['dragleave','drop'].forEach(e => {
+            uploadZone.addEventListener(e, ev => { ev.preventDefault(); uploadZone.classList.remove('dragover'); });
+        });
+        uploadZone.addEventListener('drop', ev => {
+            if (ev.dataTransfer.files.length) {
+                fileInput.files = ev.dataTransfer.files;
+                renderFiles();
+            }
         });
 
-        // 更新进度
-        function updateProgress(step, percent, title, detail) {
-            document.getElementById('progressTitle').textContent = title || '';
-            document.getElementById('progressBar').style.width = percent + '%';
-            if (detail) {
-                document.getElementById('progressDetail').textContent = detail;
-            }
-
-            ['step1', 'step2', 'step3', 'step4'].forEach((id, idx) => {
-                const el = document.getElementById(id);
-                el.classList.remove('active', 'done');
-                if (idx < step) el.classList.add('done');
-                else if (idx === step) el.classList.add('active');
+        // 文件列表渲染
+        function renderFiles() {
+            fileList.innerHTML = '';
+            Array.from(fileInput.files).forEach(f => {
+                const size = f.size > 1048576 ? (f.size/1048576).toFixed(1)+' MB' : (f.size/1024).toFixed(1)+' KB';
+                fileList.innerHTML += `<div class="file-item">
+                    <div class="file-icon">📊</div>
+                    <span class="file-name">${f.name}</span>
+                    <span class="file-size">${size}</span>
+                </div>`;
             });
+        }
+        fileInput.addEventListener('change', renderFiles);
 
-            const icons = ['📤', '📊', '📄', '📥', '✅'];
-            const iconEl = document.getElementById('progressIcon');
-            iconEl.textContent = icons[step] || '⏳';
-            if (step === 1) {
-                iconEl.classList.add('spinning');
-            } else {
-                iconEl.classList.remove('spinning');
+        // 进度更新
+        function setProgress(step, pct, title, msg) {
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('progressTitle').textContent = title || '';
+            if (msg) document.getElementById('progressMsg').textContent = msg;
+            for (let i = 0; i < 4; i++) {
+                const el = document.getElementById('step'+i);
+                el.classList.remove('active','done');
+                if (i < step) el.classList.add('done');
+                else if (i === step) el.classList.add('active');
             }
         }
 
-        // 获取等级样式类
-        function getGradeClass(grade) {
-            const gradeMap = {
-                'AAA': 'grade-aaa',
-                'AA': 'grade-aa',
-                'A': 'grade-a',
-                'BBB': 'grade-bbb',
-                'BB': 'grade-bb',
-                'B': 'grade-b',
-                'CCC': 'grade-ccc',
-            };
-            return gradeMap[grade] || '';
-        }
-
-        // 显示结果
+        // 结果展示
         function showResult(data) {
             stopPolling();
-            progressArea.classList.remove('show');
-            resultArea.classList.add('show');
+            document.getElementById('progressSection').classList.remove('show');
+            const rs = document.getElementById('resultSection');
+            rs.classList.add('show');
 
-            const grade = data.summary?.grade || '-';
-            const gradeEl = document.getElementById('resultGrade');
-            gradeEl.textContent = grade;
-            gradeEl.className = 'value grade ' + getGradeClass(grade);
+            const grade = data.summary?.grade || data.grade || '-';
+            const score = data.summary?.total_score || data.total_score || 0;
+            const suggestion = data.summary?.suggestion || data.suggestion || '-';
 
-            document.getElementById('resultScore').textContent =
-                (data.summary?.total_score?.toFixed(1) || '-') + ' 分';
-            document.getElementById('resultSuggestion').textContent =
-                data.summary?.suggestion || '-';
+            const badge = document.getElementById('resultGrade');
+            badge.textContent = grade;
+            const colors = {'AAA':'#34d399','AA':'#34d399','A':'#a3e635','BBB':'#fbbf24','BB':'#fb923c','B':'#f87171','CCC':'#ef4444'};
+            badge.style.color = colors[grade] || '#94a3b8';
+            badge.style.background = (colors[grade] || '#64748b') + '18';
+            badge.style.borderColor = (colors[grade] || '#64748b') + '30';
 
-            // 设置下载链接
-            const htmlBtn = document.getElementById('downloadHtmlBtn');
-            const pdfBtn = document.getElementById('downloadPdfBtn');
+            document.getElementById('resultTitle').textContent = '分析完成';
+            document.getElementById('resultSub').textContent = data.summary?.industry || '';
+            document.getElementById('resultScore').textContent = (score?.toFixed(1) || '-') + ' 分';
+            document.getElementById('resultGradeVal').textContent = grade;
+            document.getElementById('resultSuggestion').textContent = '💡 ' + suggestion;
 
-            htmlBtn.href = data.report_url || '#';
-            if (data.pdf_url) {
-                pdfBtn.href = data.pdf_url;
-                pdfBtn.style.display = 'inline-block';
-            } else {
-                pdfBtn.style.display = 'none';
-            }
+            const reportUrl = data.report_url || '#';
+            document.getElementById('btnViewReport').href = reportUrl;
         }
 
-        // 显示错误
         function showError(msg) {
             stopPolling();
-            errorMsg.textContent = msg;
-            errorMsg.classList.add('show');
-            progressArea.classList.remove('show');
-            resultArea.classList.remove('show');
-            submitBtn.disabled = false;
-            submitBtn.textContent = '🔍 开始分析';
+            const el = document.getElementById('errorMsg');
+            el.textContent = msg; el.classList.add('show');
+            document.getElementById('progressSection').classList.remove('show');
+            submitBtn.disabled = false; btnText.textContent = '开始分析';
         }
 
-        // 开始轮询任务状态
+        // 轮询
         function startPolling(taskId) {
             stopPolling();
-
             pollTimer = setInterval(async () => {
                 try {
-                    const response = await fetch(`/api/task/${taskId}`);
-                    if (!response.ok) {
-                        throw new Error('查询任务状态失败');
+                    const r = await fetch('/api/task/' + taskId);
+                    const s = await r.json();
+                    if (s.message) document.getElementById('progressMsg').textContent = s.message;
+                    const p = s.progress || 0;
+                    if (p < 20) setProgress(0, p, '正在上传...', s.message);
+                    else if (p < 50) setProgress(1, p, '正在解析财务数据...', s.message);
+                    else if (p < 85) setProgress(2, p, '正在计算风险指标...', s.message);
+                    else setProgress(3, p, '正在生成报告...', s.message);
+
+                    if (s.status === 'completed' && s.result) {
+                        s.result.success ? showResult(s.result) : showError(s.result.error || '分析失败');
+                    } else if (s.status === 'failed') {
+                        showError(s.error || '任务失败');
                     }
-
-                    const status = await response.json();
-
-                    // 更新进度显示
-                    if (status.message) {
-                        document.getElementById('progressDetail').textContent = status.message;
-                    }
-
-                    // 根据进度更新步骤
-                    if (status.progress < 20) {
-                        updateProgress(0, status.progress, '正在上传文件...');
-                    } else if (status.progress < 50) {
-                        updateProgress(1, status.progress, '正在分析财务数据...');
-                    } else if (status.progress < 85) {
-                        updateProgress(2, status.progress, '正在生成报告...');
-                    } else {
-                        updateProgress(3, status.progress, '报告生成中...');
-                    }
-
-                    // 检查任务状态
-                    if (status.status === 'completed' && status.result) {
-                        if (status.result.success) {
-                            showResult(status.result);
-                        } else {
-                            showError(status.result.error || '分析失败');
-                        }
-                    } else if (status.status === 'failed') {
-                        showError(status.error || '任务执行失败');
-                    }
-
-                } catch (error) {
-                    console.error('轮询错误:', error);
-                }
-            }, POLL_INTERVAL);
+                } catch(e) {}
+            }, 1000);
         }
+        function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
-        // 停止轮询
-        function stopPolling() {
-            if (pollTimer) {
-                clearInterval(pollTimer);
-                pollTimer = null;
-            }
-        }
-
-        // 重置表单
-        function resetForm() {
-            form.reset();
-            fileList.innerHTML = '';
-            errorMsg.classList.remove('show');
-            progressArea.classList.remove('show');
-            resultArea.classList.remove('show');
-            submitBtn.disabled = false;
-            submitBtn.textContent = '🔍 开始分析';
-            stopPolling();
-        }
-
-        // 新建分析按钮
-        document.getElementById('newAnalysisBtn').addEventListener('click', function(e) {
+        // 提交
+        form.addEventListener('submit', async e => {
             e.preventDefault();
-            resetForm();
-        });
+            if (!fileInput.files.length) { showError('请选择财务文件'); return; }
 
-        // 提交表单
-        form.addEventListener('submit', async function(e) {
-            e.preventDefault();
+            submitBtn.disabled = true; btnText.textContent = '分析中...';
+            document.getElementById('errorMsg').classList.remove('show');
+            document.getElementById('resultSection').classList.remove('show');
+            document.getElementById('progressSection').classList.add('show');
+            setProgress(0, 10, '正在上传文件...');
 
-            const files = fileInput.files;
-
-            if (files.length === 0) {
-                showError('请选择至少一个财务文件');
-                return;
-            }
-
-            // 显示进度
-            submitBtn.disabled = true;
-            submitBtn.textContent = '分析中...';
-            errorMsg.classList.remove('show');
-            resultArea.classList.remove('show');
-            progressArea.classList.add('show');
-            updateProgress(0, 10, '正在上传文件...');
-
-            const formData = new FormData();
-            formData.append('company_name', document.getElementById('companyName').value);
-            formData.append('industry', document.getElementById('industry').value);
-            for (let i = 0; i < files.length; i++) {
-                formData.append('files', files[i]);
-            }
+            const fd = new FormData();
+            fd.append('company_name', document.getElementById('companyName').value);
+            fd.append('industry', document.getElementById('industry').value);
+            for (let i = 0; i < fileInput.files.length; i++) fd.append('files', fileInput.files[i]);
 
             try {
-                // 优先使用异步接口
-                let apiUrl = '/api/analyze-async';
-                let useAsync = true;
-
-                // 先尝试异步接口
-                const asyncResponse = await fetch(apiUrl, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const asyncData = await asyncResponse.json();
-
-                if (!asyncResponse.ok) {
-                    // 如果异步接口失败，尝试同步接口
-                    console.log('异步接口失败，尝试同步接口...');
-                    useAsync = false;
-                } else if (asyncData.task_id) {
-                    // 异步接口成功，开始轮询
-                    updateProgress(1, 30, '文件上传完成，正在分析...');
-                    startPolling(asyncData.task_id);
-                    return;
+                const r = await fetch('/api/analyze-async', { method: 'POST', body: fd });
+                const d = await r.json();
+                if (r.ok && d.task_id) {
+                    setProgress(1, 25, '文件上传完成，开始分析...');
+                    startPolling(d.task_id);
+                } else {
+                    // fallback sync
+                    const sr = await fetch('/api/analyze', { method: 'POST', body: fd });
+                    const sd = await sr.json();
+                    if (sd.success) { setProgress(3, 100, '完成！'); setTimeout(() => showResult(sd), 300); }
+                    else throw new Error(sd.detail || '分析失败');
                 }
-
-                // 如果异步接口不可用，使用同步接口
-                if (!useAsync) {
-                    const syncResponse = await fetch('/api/analyze', {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    const data = await syncResponse.json();
-
-                    if (!syncResponse.ok) {
-                        throw new Error(data.detail || '分析失败');
-                    }
-
-                    if (data.success) {
-                        updateProgress(2, 75, '正在生成报告...');
-                        await new Promise(r => setTimeout(r, 300));
-                        updateProgress(3, 90, '报告生成完成！');
-                        await new Promise(r => setTimeout(r, 200));
-                        showResult(data);
-                    } else {
-                        throw new Error(data.detail || '分析失败');
-                    }
-                }
-
-            } catch (error) {
-                showError(error.message || '网络错误，请重试');
-            }
+            } catch(err) { showError(err.message || '网络错误'); }
         });
+
+        // 新建分析
+        document.getElementById('btnNewAnalysis').addEventListener('click', e => {
+            e.preventDefault();
+            form.reset(); fileList.innerHTML = '';
+            document.getElementById('errorMsg').classList.remove('show');
+            document.getElementById('progressSection').classList.remove('show');
+            document.getElementById('resultSection').classList.remove('show');
+            submitBtn.disabled = false; btnText.textContent = '开始分析';
+            stopPolling();
+        });
+
+        // 健康检查
+        fetch('/health').then(r=>r.json()).then(d => {
+            document.getElementById('topStatus').textContent = d.pdf_ready ? 'PDF ✓' : '';
+        }).catch(() => {});
     </script>
 </body>
 </html>

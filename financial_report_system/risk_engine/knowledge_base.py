@@ -23,6 +23,8 @@ v3.0 新增：
   - 利润含金量优质规则（正向加分）
 """
 
+from typing import List, Optional, Dict, Any
+
 KNOWLEDGE_BASE = [
 
     # ═══════════════════════════════════════════════
@@ -299,7 +301,7 @@ KNOWLEDGE_BASE = [
 ]
 
 
-def get_triggered_rules(metric_name: str, metric_value) -> list:
+def get_triggered_rules(metric_name: str, metric_value: Optional[float]) -> List[Dict[str, Any]]:
     """根据指标名称和数值，返回触发的知识库规则列表"""
     if metric_value is None:
         return []
@@ -314,12 +316,12 @@ def get_triggered_rules(metric_name: str, metric_value) -> list:
     return triggered
 
 
-def get_rules_by_category(category: str) -> list:
+def get_rules_by_category(category: str) -> List[Dict[str, Any]]:
     """获取特定类别的所有规则"""
     return [r for r in KNOWLEDGE_BASE if r['category'] == category]
 
 
-def get_all_categories() -> list:
+def get_all_categories() -> List[str]:
     """获取所有类别"""
     seen = []
     for r in KNOWLEDGE_BASE:

@@ -1,0 +1,16 @@
+# Docker 构建排除列表
+venv/
+.env
+*.log
+data/*.xls
+data/*.xlsx
+reports/
+uploads/
+.git/
+.github/
+*.md
+!requirements.txt
+!app/
+!risk_engine/
+!static/
+!.env.example

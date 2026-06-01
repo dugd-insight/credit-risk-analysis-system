@@ -36,7 +36,7 @@ except ImportError:
 app = FastAPI(
     title="信贷风险分析系统",
     description="银行信贷风险分析报告生成系统，支持多期财务报表分析",
-    version="2.1.2"
+    version="3.0"
 )
 
 # 加载配置

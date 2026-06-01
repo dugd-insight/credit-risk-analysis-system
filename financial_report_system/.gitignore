@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 环境配置（包含敏感信息）
+.env
+
+# 数据与报告（不入库）
+data/*.xls
+data/*.xlsx
+data/*.csv
+data/*.pdf
+reports/*.html
+reports/*.pdf
+uploads/*
+!data/.gitkeep
+!reports/.gitkeep
+!uploads/.gitkeep
+
+# 日志
+*.log
+server.log
+
+# 测试产物
+test_report*.html
+api_test_report.html

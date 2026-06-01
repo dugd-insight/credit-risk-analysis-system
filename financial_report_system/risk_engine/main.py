@@ -17,8 +17,11 @@
 import os
 import sys
 import argparse
+from typing import Dict
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+from logger import logger
 
 from file_parser import (
     load_all_files, load_files_multi_period,
@@ -28,7 +31,7 @@ from risk_analyzer import calculate_metrics, compute_total_score
 from report_generator import generate_report
 
 
-def main():
+def main() -> str:
     parser = argparse.ArgumentParser(description='银行信贷风险分析报告生成系统 v3.0')
     parser.add_argument('--dir',     default=None, help='财务文件目录（扫描所有 xls/xlsx）')
     parser.add_argument('--files',   nargs='+',    help='直接指定多个财务文件路径')
@@ -41,19 +44,19 @@ def main():
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    print(f'\n{"=" * 62}')
-    print(f'  银行信贷风险分析系统 v3.0  |  三表全量 + 知识库评判')
-    print(f'{"=" * 62}')
-    print(f'  企业：{args.company}')
-    print(f'  行业：{args.industry}')
+    logger.info(f'\n{"=" * 62}')
+    logger.info(f'  银行信贷风险分析系统 v3.0  |  三表全量 + 知识库评判')
+    logger.info(f'{"=" * 62}')
+    logger.info(f'  企业：{args.company}')
+    logger.info(f'  行业：{args.industry}')
 
     # ─── Step 1：加载文件 ───────────────────────────────────
-    print('\n[1/4] 扫描并解析财务文件（三表全量）...')
+    logger.info('\n[1/4] 扫描并解析财务文件（三表全量）...')
 
     if args.files:
         # 直接指定文件列表
         filepaths = [os.path.abspath(f) if not os.path.isabs(f) else f for f in args.files]
-        print(f'  指定文件: {[os.path.basename(f) for f in filepaths]}')
+        logger.info(f'  指定文件: {[os.path.basename(f) for f in filepaths]}')
         multi = load_files_multi_period(filepaths)
         data = {
             'financial': {},
@@ -75,24 +78,24 @@ def main():
 
     elif args.dir:
         data_dir = os.path.join(script_dir, args.dir) if not os.path.isabs(args.dir) else args.dir
-        print(f'  数据目录: {data_dir}')
+        logger.info(f'  数据目录: {data_dir}')
         data = load_all_files(data_dir)
     else:
         # 默认尝试上级目录的 data/
         data_dir = os.path.join(os.path.dirname(script_dir), 'data')
-        print(f'  数据目录（默认）: {data_dir}')
+        logger.info(f'  数据目录（默认）: {data_dir}')
         data = load_all_files(data_dir)
 
     periods = sorted(data.get('periods', {}).keys())
-    print(f'  识别报告期: {periods}')
-    print(f'  财务科目数: {len(data["financial"])}')
-    print(f'  税务指标数: {len(data.get("tax", {}))}')
+    logger.info(f'  识别报告期: {periods}')
+    logger.info(f'  财务科目数: {len(data["financial"])}')
+    logger.info(f'  税务指标数: {len(data.get("tax", {}))}')
     if data.get('errors'):
         for e in data['errors']:
-            print(f'  [WARN] {e}')
+            logger.warning(f'  {e}')
 
     if not data['financial']:
-        print('\n[WARNING] 未能提取有效财务数据，使用演示数据...')
+        logger.warning('\n未能提取有效财务数据，使用演示数据...')
         data['financial'] = _demo_financial()
         data['latest'] = data['financial']
         data['earliest'] = {}
@@ -100,7 +103,7 @@ def main():
         data['consistency'] = []
 
     # ─── Step 1.5：三表勾稽校验 ─────────────────────────────
-    print('\n[1.5/4] 三表勾稽校验...')
+    logger.info('\n[1.5/4] 三表勾稽校验...')
     three_stmt = {}
     consistency_result = []
     
@@ -115,35 +118,35 @@ def main():
         try:
             three_stmt = extract_three_statements(latest_file)
             if three_stmt.get('balance_sheet') or three_stmt.get('income_statement'):
-                print(f'  ✅ 三表提取成功')
+                logger.info('  三表提取成功')
                 consistency_result = check_cross_statement_consistency(three_stmt)
-                print(f'  ✅ 勾稽校验完成（{len(consistency_result)} 项）')
+                logger.info(f'  勾稽校验完成（{len(consistency_result)} 项）')
             else:
-                print('  ⚠ 三表数据不完整')
+                logger.warning('  三表数据不完整')
         except Exception as e:
-            print(f'  ⚠ 勾稽校验跳过: {str(e)[:50]}')
+            logger.warning(f'  勾稽校验跳过: {str(e)[:50]}')
             three_stmt = {}
             consistency_result = []
     else:
-        print('  ⚠ 未找到有效财务文件，跳过勾稽校验')
+        logger.warning('  未找到有效财务文件，跳过勾稽校验')
     
     data['three_stmt'] = three_stmt
     data['consistency'] = consistency_result
 
     # ─── Step 2：计算指标 ─────────────────────────────────
-    print('\n[2/4] 计算财务指标（含知识库触发）...')
+    logger.info('\n[2/4] 计算财务指标（含知识库触发）...')
     fin_latest = data['financial']
     fin_prev   = data.get('earliest', {}) or {}
 
     if fin_prev and fin_prev != fin_latest and len(fin_prev) > 5:
-        print(f'  启用跨期趋势分析（{len(periods)} 期数据）')
+        logger.info(f'  启用跨期趋势分析（{len(periods)} 期数据）')
     else:
         fin_prev = None
 
     metrics = calculate_metrics(fin_latest, data.get('tax', {}), fin_prev)
     valid_metrics = {k: v for k, v in metrics.items()
                      if isinstance(v, dict) and v.get('value') is not None}
-    print(f'  有效指标: {len(valid_metrics)} 项')
+    logger.info(f'  有效指标: {len(valid_metrics)} 项')
 
     # 汇报关键指标
     key_show = ['current_ratio', 'quick_ratio', 'debt_ratio',
@@ -157,23 +160,23 @@ def main():
             display = f'{v * 100:.2f}%' if u == '%' else (
                       f'{v / 1e4:.2f}万元' if (u == '元' and abs(v) >= 1e4) else f'{v:.3f}')
             flag = ' ⚠' if m.get('triggered_rules') else ''
-            print(f'  {m["label"]}: {display}{flag}')
+            logger.info(f'  {m["label"]}: {display}{flag}')
 
     total_alerts = sum(len(m.get('triggered_rules', []))
                        for m in metrics.values() if isinstance(m, dict))
-    print(f'  知识库触发规则: {total_alerts} 条')
+    logger.info(f'  知识库触发规则: {total_alerts} 条')
 
     # ─── Step 3：综合评分 ─────────────────────────────────
-    print(f'\n[3/4] 综合评分（{args.industry}行业权重）...')
+    logger.info(f'\n[3/4] 综合评分（{args.industry}行业权重）...')
     score_result = compute_total_score(metrics, args.industry)
-    print(f'  总分: {score_result["total_score"]:.1f}  等级: {score_result["grade"]}')
-    print(f'  授信建议: {score_result["suggestion"]}')
+    logger.info(f'  总分: {score_result["total_score"]:.1f}  等级: {score_result["grade"]}')
+    logger.info(f'  授信建议: {score_result["suggestion"]}')
     for dim, score in score_result['dimension_scores'].items():
         bar = '█' * int(score / 10) + '░' * (10 - int(score / 10))
-        print(f'  {dim:15s} [{bar}] {score:.0f}分')
+        logger.info(f'  {dim:15s} [{bar}] {score:.0f}分')
 
     # ─── Step 4：生成报告 ─────────────────────────────────
-    print('\n[4/4] 生成 HTML 报告（知识库增强版）...')
+    logger.info('\n[4/4] 生成 HTML 报告（知识库增强版）...')
     if args.output:
         out_path = args.output
     else:
@@ -198,13 +201,13 @@ def main():
         consistency_result = data.get('consistency', []),
     )
 
-    print(f'\n{"=" * 62}')
-    print(f'  ✅ 报告已生成: {out_path}')
-    print(f'{"=" * 62}\n')
+    logger.info(f'\n{"=" * 62}')
+    logger.info(f'  报告已生成: {out_path}')
+    logger.info(f'{"=" * 62}\n')
     return out_path
 
 
-def _demo_financial():
+def _demo_financial() -> Dict[str, float]:
     """演示数据（当无法读取文件时使用）"""
     return {
         'current_assets': 24521110, 'total_assets': 43858080,

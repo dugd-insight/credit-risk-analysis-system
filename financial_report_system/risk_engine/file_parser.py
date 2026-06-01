@@ -13,17 +13,19 @@
 import re
 import os
 import openpyxl
-import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+
+from logger import logger
+from constants import INCOME_SWAP_THRESHOLD
 
 
 # ─────────────────────────────────────────────
 # 工具函数
 # ─────────────────────────────────────────────
 
-def _try_numeric(val):
+def _try_numeric(val) -> Optional[float]:
     """尝试将任意值转为浮点数，失败返回 None"""
     if val is None:
         return None
@@ -39,15 +41,15 @@ def _try_numeric(val):
         return None
 
 
-def _is_year(n):
+def _is_year(n: Optional[float]) -> bool:
     return n is not None and 2015 <= n <= 2035
 
 
-def _is_row_num(n):
+def _is_row_num(n: Optional[float]) -> bool:
     return n is not None and 1 <= n <= 99 and n == int(n)
 
 
-def _clean_kw(s):
+def _clean_kw(s: str) -> str:
     """清洗科目文字用于关键词匹配"""
     if not isinstance(s, str):
         return ''
@@ -164,6 +166,8 @@ ASSET_MAP = {
     '短期投资': 'short_term_investment',
     '应收票据': 'notes_receivable',
     '应收账款': 'accounts_receivable',
+    '应收款项': 'accounts_receivable',      # 担保公司变体
+    '应收款': 'accounts_receivable',        # 通用简称
     '预付款项': 'prepaid_accounts',
     '预付账款': 'prepaid_accounts',
     '应收股利': 'dividend_receivable',
@@ -185,6 +189,7 @@ ASSET_MAP = {
     # 担保公司专用
     '存出保证金': 'deposit_out',
     '抵债资产': 'debt_offset_assets',
+    '长期待摊费用': 'long_term_deferred_expense',  # 担保公司专用
 }
 
 LIABILITY_MAP = {
@@ -194,8 +199,10 @@ LIABILITY_MAP = {
     '预收款项': 'advance_receipts',
     '预收账款': 'advance_receipts',
     '应付职工薪酬': 'wages_payable',
+    '应付工资及福利费': 'wages_payable',      # 担保公司变体
     '应交税费': 'taxes_payable',
     '应交税金': 'taxes_payable',
+    '应交税金及附加': 'taxes_payable',         # 担保公司变体(含附加)
     '其他应付款': 'other_payables',
     '存入保证金': 'deposit_in',
     '其他流动负债': 'other_current_liabilities',
@@ -211,6 +218,7 @@ LIABILITY_MAP = {
     '所有者权益合计': 'total_equity',
     '股东权益合计': 'total_equity',
     '一般风险准备': 'general_risk_reserve',
+    '担保扶持资金': 'subsidy_fund',           # 担保公司专用
     '负债及所有者权益总计': 'total_liab_equity',
 }
 
@@ -237,19 +245,58 @@ INCOME_MAP = {
 }
 
 CASHFLOW_MAP = {
+    # 销售/收款
+    '销售商品、提供劳务收到的现金': 'cash_from_sales',
     '销售商品收到的现金': 'cash_from_sales',
-    '收到的增值税': 'vat_received',
+    '提供劳务收到的现金': 'cash_from_sales',
+    '收到的税费返还': 'tax_refund',
+    '收到税费返还': 'tax_refund',
+    '收到其他与经营活动有关的现金': 'other_operating_cash_in',
+    # 经营流入小计
     '经营活动现金流入小计': 'operating_inflow',
+    # 购买/付款
+    '购买商品、接受劳务支付的现金': 'cash_paid_goods',
     '购买商品支付的现金': 'cash_paid_goods',
+    '支付给职工以及为职工支付的现金': 'cash_paid_staff',
     '支付给职工及为职工支付的现金': 'cash_paid_staff',
+    '支付的各项税费': 'taxes_paid',
+    '支付其他与经营活动有关的现金': 'other_operating_cash_out',
+    # 经营流出小计
     '经营活动现金流出小计': 'operating_outflow',
+    # 经营活动现金流量净额（多种表述）
     '经营活动产生的现金流量净额': 'operating_cashflow',
+    '经营活动产生的现金流净流量': 'operating_cashflow',
     '经营活动现金流量净额': 'operating_cashflow',
+    '经营活动净现金流': 'operating_cashflow',
+    # 投资活动
+    '收回投资收到的现金': 'cash_from_investment',
+    '取得投资收益收到的现金': 'cash_from_invest_income',
+    '处置固定资产、无形资产收回的现金': 'cash_from_asset_disposal',
+    '购建固定资产、无形资产支付的现金': 'cash_for_assets',
+    '投资支付的现金': 'cash_for_investment',
+    '投资活动现金流入小计': 'investing_cash_inflow',
+    '投资活动现金流出小计': 'investing_cash_outflow',
     '投资活动产生的现金流量净额': 'investing_cashflow',
+    '投资活动产生的现金流净流量': 'investing_cashflow',
+    # 筹资活动
+    '取得借款收到的现金': 'cash_from_borrowings',
+    '吸收投资收到的现金': 'cash_from_equity',
+    '筹资活动现金流入小计': 'financing_cash_inflow',
+    '偿还债务支付的现金': 'cash_for_debt',
+    '分配股利、利润或偿付利息支付的现金': 'cash_for_dividends',
+    '筹资活动现金流出小计': 'financing_cash_outflow',
     '筹资活动产生的现金流量净额': 'financing_cashflow',
+    '筹资活动产生的现金流净流量': 'financing_cashflow',
+    # 现金净增减
     '现金及现金等价物净增加额': 'net_cash_change',
+    '现金净增加额': 'net_cash_change',
     '期末现金及现金等价物余额': 'cash_end',
+    '期末现金余额': 'cash_end',
     '期初现金及现金等价物余额': 'cash_begin',
+    '期初现金余额': 'cash_begin',
+    # 补充
+    '收到的增值税': 'vat_received',
+    '支付的增值税': 'vat_paid',
 }
 
 
@@ -288,13 +335,13 @@ def _read_sheets_raw(filepath: str) -> Optional[Dict[str, List[List]]]:
                         rows.append(list(row))
                 result[sname] = rows
         else:
-            print(f'[ERROR] 不支持的文件格式: {ext}')
+            logger.error(f'不支持的文件格式: {ext}')
             return None
 
         return result if result else None
 
     except Exception as e:
-        print(f'[ERROR] 读取失败 {filepath}: {e}')
+        logger.error(f'读取失败 {filepath}: {e}')
         return None
 
 
@@ -359,13 +406,18 @@ def _parse_balance_sheet(rows: List[List]) -> Dict:
 
 
 # ─────────────────────────────────────────────
-# 利润表解析（提取本期数 + 累计数）
+# 流量表解析公共函数
 # ─────────────────────────────────────────────
 
-def _parse_income_statement(rows: List[List]) -> Dict:
+def _parse_flow_statement(rows: List[List], field_map: Dict, swap_if_benqi_exceeds: bool = True) -> Dict:
     """
-    解析利润表，同时提取本期数和累计数。
+    解析流量表（利润表或现金流量表），提取本期数和累计数。
     标准格式：科目 | 行次 | 本月数 | 本年累计
+
+    Args:
+        rows: 表格行数据
+        field_map: 科目映射表 (INCOME_MAP 或 CASHFLOW_MAP)
+        swap_if_benqi_exceeds: 当本期 > 累计时是否交换（利润表需要）
 
     Returns: {
         field: {'benqi': float, 'leiji': float}
@@ -376,6 +428,8 @@ def _parse_income_statement(rows: List[List]) -> Dict:
     for row in rows:
         if not row:
             continue
+
+        # 查找标签
         label = None
         for cell in row:
             if isinstance(cell, str) and len(cell.strip()) > 2:
@@ -384,15 +438,17 @@ def _parse_income_statement(rows: List[List]) -> Dict:
         if not label:
             continue
 
+        # 匹配字段
         lk = _clean_kw(label)
         matched_field = None
-        for kw, field in INCOME_MAP.items():
+        for kw, field in field_map.items():
             if _clean_kw(kw) in lk and len(_clean_kw(kw)) > 2:
                 matched_field = field
                 break
         if not matched_field:
             continue
 
+        # 提取数字
         nums = []
         for cell in row:
             n = _try_numeric(cell)
@@ -402,77 +458,32 @@ def _parse_income_statement(rows: List[List]) -> Dict:
         if not nums:
             continue
 
+        # 分离本期和累计
         if len(nums) >= 2:
             leiji = nums[-1]
             benqi = nums[-2]
-            # 本期不应大于累计（正常情况），若大于则交换
-            if benqi > leiji * 1.1 and leiji > 0:
+            # 利润表：本期不应大于累计，若大于则交换
+            if swap_if_benqi_exceeds and benqi > leiji * INCOME_SWAP_THRESHOLD and leiji > 0:
                 benqi, leiji = leiji, benqi
         else:
             leiji = nums[0]
             benqi = nums[0]
 
+        # 保存数据（取绝对值较大的）
         if matched_field not in data or abs(leiji) > abs(data.get(matched_field, {}).get('leiji', 0) or 0):
             data[matched_field] = {'benqi': benqi, 'leiji': leiji}
 
     return data
 
 
-# ─────────────────────────────────────────────
-# 现金流量表解析（提取累计数）
-# ─────────────────────────────────────────────
+def _parse_income_statement(rows: List[List]) -> Dict:
+    """解析利润表"""
+    return _parse_flow_statement(rows, INCOME_MAP, swap_if_benqi_exceeds=True)
+
 
 def _parse_cash_flow(rows: List[List]) -> Dict:
-    """
-    解析现金流量表。
-    标准格式：科目 | 行次 | 本月数 | 本年累计
-
-    Returns: {
-        field: {'benqi': float, 'leiji': float}
-    }
-    """
-    data = {}
-
-    for row in rows:
-        if not row:
-            continue
-        label = None
-        for cell in row:
-            if isinstance(cell, str) and len(cell.strip()) > 2:
-                label = cell.strip()
-                break
-        if not label:
-            continue
-
-        lk = _clean_kw(label)
-        matched_field = None
-        for kw, field in CASHFLOW_MAP.items():
-            if _clean_kw(kw) in lk and len(_clean_kw(kw)) > 2:
-                matched_field = field
-                break
-        if not matched_field:
-            continue
-
-        nums = []
-        for cell in row:
-            n = _try_numeric(cell)
-            if n is not None and not _is_row_num(n) and not _is_year(n):
-                nums.append(n)
-
-        if not nums:
-            continue
-
-        if len(nums) >= 2:
-            leiji = nums[-1]
-            benqi = nums[-2]
-        else:
-            leiji = nums[0]
-            benqi = nums[0]
-
-        if matched_field not in data:
-            data[matched_field] = {'benqi': benqi, 'leiji': leiji}
-
-    return data
+    """解析现金流量表"""
+    return _parse_flow_statement(rows, CASHFLOW_MAP, swap_if_benqi_exceeds=False)
 
 
 # ─────────────────────────────────────────────
@@ -514,13 +525,13 @@ def extract_three_statements(filepath: str) -> Dict:
         sc = _clean_kw(sname)
         if '资产负债' in sc or ('资产' in sc and '表' in sc):
             result['balance_sheet'] = _parse_balance_sheet(rows)
-            print(f'    [资产负债表] {sname}: {len(result["balance_sheet"])} 项')
+            logger.info(f'    [资产负债表] {sname}: {len(result["balance_sheet"])} 项')
         elif '利润' in sc:
             result['income_statement'] = _parse_income_statement(rows)
-            print(f'    [利润表] {sname}: {len(result["income_statement"])} 项')
-        elif '现金流' in sc:
+            logger.info(f'    [利润表] {sname}: {len(result["income_statement"])} 项')
+        elif '现金流' in sc or '现金流动' in sc or '资金流量' in sc or '现金及现金等价物' in sc:
             result['cash_flow'] = _parse_cash_flow(rows)
-            print(f'    [现金流量表] {sname}: {len(result["cash_flow"])} 项')
+            logger.info(f'    [现金流量表] {sname}: {len(result["cash_flow"])} 项')
 
     # 期间检测
     period = _detect_period(filepath, raw_sheets)
@@ -607,7 +618,7 @@ def flatten_financial(three_stmt: Dict, use_annualized: bool = True) -> Dict:
     return flat
 
 
-def _fill_derived(f: Dict) -> Dict:
+def _fill_derived(f: Dict[str, Optional[float]]) -> Dict[str, Optional[float]]:
     """补充可推导的合计项（不覆盖已有值）"""
     v = dict(f)
 
@@ -630,12 +641,15 @@ def _fill_derived(f: Dict) -> Dict:
 
     if not v.get('total_assets'):
         r = s('current_assets', 'long_term_equity_inv', 'fixed_assets',
-              'intangible_assets', 'long_term_prepaid')
+              'intangible_assets', 'long_term_deferred_expense')
         if r:
             v['total_assets'] = r
 
     if not v.get('total_liabilities'):
-        r = s('current_liabilities', 'non_current_liabilities', 'long_term_loans')
+        # 注意：long_term_loans 是 non_current_liabilities 的子项，取其一即可
+        r = s('current_liabilities', 'non_current_liabilities')
+        if not r or r == 0:
+            r = s('current_liabilities', 'long_term_loans')
         if r:
             v['total_liabilities'] = r
 
@@ -736,7 +750,7 @@ def check_cross_statement_consistency(three_stmt: Dict) -> List[Dict]:
 # 多文件多期加载
 # ─────────────────────────────────────────────
 
-def _detect_period(filepath: str, raw_sheets: Dict[str, List[List]]) -> str:
+def _detect_period(filepath: str, raw_sheets: Dict[str, List[List[Optional[float]]]]) -> str:
     """从文件名或表头检测报告期，返回 'YYYY.MM'"""
     fname = os.path.basename(filepath)
 
@@ -795,7 +809,7 @@ def load_files_multi_period(filepaths: List[str]) -> Dict:
         if ext not in ('.xlsx', '.xls'):
             continue
 
-        print(f'\n  [文件] {os.path.basename(fpath)}')
+        logger.info(f'\n  [文件] {os.path.basename(fpath)}')
         try:
             three_stmt = extract_three_statements(fpath)
             period = three_stmt['period']
@@ -812,13 +826,13 @@ def load_files_multi_period(filepaths: List[str]) -> Dict:
             }
 
             period_info = three_stmt['period_info']
-            print(f'    → 期间: {period} ({period_info.get("report_type","?")} 置信度:{period_info.get("confidence",0):.0%})')
-            print(f'    → 年化因子: ×{period_info.get("annualization_factor", 1.0):.1f}')
-            print(f'    → 勾稽校验: {len(consistency)} 项，通过 {sum(c["result"] for c in consistency)} 项')
+            logger.info(f'    → 期间: {period} ({period_info.get("report_type","?")} 置信度:{period_info.get("confidence",0):.0%})')
+            logger.info(f'    → 年化因子: ×{period_info.get("annualization_factor", 1.0):.1f}')
+            logger.info(f'    → 勾稽校验: {len(consistency)} 项，通过 {sum(c["result"] for c in consistency)} 项')
 
         except Exception as e:
             result['errors'].append(f'{os.path.basename(fpath)}: {e}')
-            print(f'  [ERROR] {os.path.basename(fpath)}: {e}')
+            logger.error(f'  {os.path.basename(fpath)}: {e}')
 
     if result['periods']:
         sorted_p = sorted(result['periods'].keys())
@@ -876,9 +890,9 @@ def load_all_files(data_dir: str) -> Dict:
             ep = multi['earliest_period']
             result['earliest'] = multi['periods'][ep]['financial']
 
-        print(f'\n  [汇总] 期数={len(result["periods"])}, '
-              f'最新期={multi.get("latest_period","?")}, '
-              f'财务科目={len(result["financial"])}')
+        logger.info(f'\n  [汇总] 期数={len(result["periods"])}, '
+                    f'最新期={multi.get("latest_period","?")}, '
+                    f'财务科目={len(result["financial"])}')
 
     return result
 
@@ -891,7 +905,7 @@ def parse_pdf_tax(filepath: str) -> Dict[str, float]:
     try:
         import pdfplumber
     except ImportError:
-        print('[ERROR] 请安装 pdfplumber: pip install pdfplumber')
+        logger.error('请安装 pdfplumber: pip install pdfplumber')
         return {}
 
     result = {}
@@ -911,7 +925,7 @@ def parse_pdf_tax(filepath: str) -> Dict[str, float]:
         if '所得税' in full_text or '居民企业' in full_text:
             result.update(_parse_cit_return(full_text, all_tables, filepath))
     except Exception as e:
-        print(f'[ERROR] PDF解析失败 {filepath}: {e}')
+        logger.error(f'PDF解析失败 {filepath}: {e}')
 
     return result
 

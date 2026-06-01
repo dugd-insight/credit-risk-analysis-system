@@ -14,7 +14,7 @@
 import os
 import json
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 RISK_LEVEL_MAP = {
@@ -32,7 +32,7 @@ GRADE_COLOR = {
 }
 
 
-def _fmt(v, unit='', pct=False):
+def _fmt(v: Optional[float], unit: str = '', pct: bool = False) -> str:
     if v is None:
         return 'N/A'
     if pct or unit == '%':
@@ -48,14 +48,14 @@ def _fmt(v, unit='', pct=False):
     return f'{v:.3f}'
 
 
-def _fmt_wan(v):
+def _fmt_wan(v: Optional[float]) -> str:
     """万元格式化"""
     if v is None:
         return 'N/A'
     return f'{v/1e4:,.2f} 万元'
 
 
-def _score_bar(score, width=120):
+def _score_bar(score: float, width: int = 120) -> str:
     pct = max(0, min(100, score))
     color = '#1D9E75' if pct >= 75 else ('#EF9F27' if pct >= 60 else ('#D85A30' if pct >= 40 else '#A32D2D'))
     return (
@@ -102,22 +102,20 @@ def _build_consistency_check_html(three_stmt: Dict, consistency_result: List[Dic
     
     items_html = ''
     for item in consistency_result:
-        status = item.get('status', 'unknown')
-        if status == 'pass':
+        result = item.get('result', False)
+        if result:
             icon, color, bg = '✅', '#1a6b3a', '#eaf3de'
-        elif status == 'warn':
-            icon, color, bg = '⚠️', '#854f0b', '#fef3e2'
         else:
             icon, color, bg = '❌', '#7a1010', '#fde8e8'
-        
+
         items_html += f'''
         <div style="margin:8px 0;padding:10px 12px;background:{bg};border-radius:6px">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
                 <span style="font-size:16px">{icon}</span>
-                <span style="font-weight:500;color:{color}">{item.get('name', '')}</span>
+                <span style="font-weight:500;color:{color}">{item.get('check', '')}</span>
             </div>
-            <div style="font-size:12px;color:#555">{item.get('description', '')}</div>
-            {f'<div style="margin-top:4px;font-size:11px;color:#888">参考值: {item.get("reference", "")}</div>' if item.get('reference') else ''}
+            <div style="font-size:12px;color:#555">{item.get('detail', '')}</div>
+            {f'<div style="margin-top:4px;font-size:11px;color:#888">校验逻辑: {item.get("theory", "")}</div>' if item.get('theory') else ''}
         </div>'''
     
     return f'''
@@ -129,7 +127,7 @@ def _build_consistency_check_html(three_stmt: Dict, consistency_result: List[Dic
 
 def _build_mscore_detail_html(metrics: Dict) -> str:
     """构建 Beneish M-Score 详细计算"""
-    ms = metrics.get('mscore', {})
+    ms = metrics.get('m_score', {})
     if not ms or ms.get('value') is None:
         return ''
     
@@ -255,30 +253,46 @@ def _build_knowledge_base_section(metrics: Dict) -> str:
 
 
 def _build_balance_sheet_table(fin: Dict) -> str:
-    """构建资产负债表"""
+    """构建资产负债表
+    
+    注意：键名必须与 file_parser.py 的 ASSET_MAP/LIABILITY_MAP 输出保持一致
+    ASSET_MAP 输出: cash, short_term_investment, notes_receivable, accounts_receivable,
+                    prepaid_accounts, other_receivables, inventory, current_assets, 
+                    fixed_assets, intangible_assets, total_assets, deposit_out, 
+                    long_term_deferred_expense 等
+    LIABILITY_MAP 输出: short_term_loans, notes_payable, accounts_payable, advance_receipts,
+                      wages_payable, taxes_payable, other_payables, deposit_in, current_liabilities,
+                      long_term_loans, non_current_liabilities, total_liabilities,
+                      paid_in_capital, capital_reserve, surplus_reserve, retained_earnings, 
+                      total_equity, subsidy_fund 等
+    """
     items = [
         ('资产类', [
-            ('货币资金', 'monetary_funds'),
-            ('交易性金融资产', 'trading_financial_assets'),
+            ('货币资金', 'cash'),
+            ('短期投资', 'short_term_investment'),
+            ('应收票据', 'notes_receivable'),
             ('应收账款', 'accounts_receivable'),
-            ('预付款项', 'prepayments'),
+            ('预付款项', 'prepaid_accounts'),
             ('其他应收款', 'other_receivables'),
             ('存货', 'inventory'),
             ('流动资产合计', 'current_assets'),
             ('固定资产', 'fixed_assets'),
             ('无形资产', 'intangible_assets'),
-            ('非流动资产合计', 'non_current_assets'),
+            ('长期待摊费用', 'long_term_deferred_expense'),  # 担保公司专用
+            ('非流动资产合计', 'long_term_equity_inv'),
             ('资产总计', 'total_assets'),
         ]),
         ('负债类', [
-            ('短期借款', 'short_term_borrowings'),
+            ('短期借款', 'short_term_loans'),
+            ('应付票据', 'notes_payable'),
             ('应付账款', 'accounts_payable'),
             ('预收款项', 'advance_receipts'),
-            ('应付职工薪酬', 'employee_compensation_payable'),
+            ('应付职工薪酬', 'wages_payable'),
             ('应交税费', 'taxes_payable'),
             ('其他应付款', 'other_payables'),
+            ('存入保证金', 'deposit_in'),  # 担保公司专用
             ('流动负债合计', 'current_liabilities'),
-            ('长期借款', 'long_term_borrowings'),
+            ('长期借款', 'long_term_loans'),
             ('非流动负债合计', 'non_current_liabilities'),
             ('负债合计', 'total_liabilities'),
         ]),
@@ -295,19 +309,20 @@ def _build_balance_sheet_table(fin: Dict) -> str:
         rows = ''
         for label, key in category_items:
             v = fin.get(key)
+            is_total = '合计' in label or '总计' in label
             rows += f'''
             <tr>
-                <td style="padding:7px 10px;font-size:12px;{'font-weight:500' if '合计' in label else ''}">{label}</td>
-                <td style="padding:7px 10px;font-size:12px;text-align:right;{'font-weight:500' if '合计' in label else ''}">{_fmt_wan(v)}</td>
+                <td style="padding:5px 8px;font-size:13px;border:1px solid #e5e7eb;{'font-weight:600;background:#f8f9fa' if is_total else ''}">{label}</td>
+                <td style="padding:5px 8px;font-size:13px;text-align:right;border:1px solid #e5e7eb;{'font-weight:600;background:#f8f9fa' if is_total else ''}">{_fmt_wan(v)}</td>
             </tr>'''
         return rows
     
     html = ''
     for category, category_items in items:
         html += f'''
-        <div style="margin-bottom:16px">
-            <div style="font-weight:600;font-size:13px;color:#333;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #e5e7eb">{category}</div>
-            <table style="width:100%">
+        <div style="margin-bottom:12px">
+            <div style="font-weight:600;font-size:13px;color:#333;margin-bottom:4px;padding-bottom:4px;border-bottom:2px solid #4F46E5">{category}</div>
+            <table style="width:100%;border-collapse:collapse">
                 <tbody>{build_rows(category_items)}</tbody>
             </table>
         </div>'''
@@ -316,51 +331,70 @@ def _build_balance_sheet_table(fin: Dict) -> str:
 
 
 def _build_income_statement_table(fin: Dict) -> str:
-    """构建利润表"""
+    """构建利润表
+    
+    注意：键名必须与 file_parser.py 的 INCOME_MAP 输出保持一致
+    INCOME_MAP 输出: revenue, cost_of_sales, gross_profit, tax_and_surcharges, business_tax,
+                    selling_expense, admin_expense, finance_cost, investment_income,
+                    operating_profit, non_operating_income, non_operating_expense,
+                    profit_before_tax, income_tax, net_profit
+    """
     items = [
         ('营业收入', 'revenue'),
         ('营业成本', 'cost_of_sales'),
-        ('税金及附加', 'taxes_and_surcharges'),
-        ('销售费用', 'selling_expenses'),
-        ('管理费用', 'administrative_expenses'),
-        ('财务费用', 'financial_expenses'),
+        ('税金及附加', 'tax_and_surcharges'),
+        ('销售费用', 'selling_expense'),
+        ('管理费用', 'admin_expense'),
+        ('财务费用', 'finance_cost'),
         ('资产减值损失', 'asset_impairment_loss'),
         ('公允价值变动收益', 'fair_value_change_income'),
         ('投资收益', 'investment_income'),
         ('营业利润', 'operating_profit'),
         ('营业外收入', 'non_operating_income'),
         ('营业外支出', 'non_operating_expense'),
-        ('利润总额', 'total_profit'),
-        ('所得税费用', 'income_tax_expense'),
+        ('利润总额', 'profit_before_tax'),
+        ('所得税费用', 'income_tax'),
         ('净利润', 'net_profit'),
     ]
     
     rows = ''
     for label, key in items:
         v = fin.get(key)
-        is_highlight = key in ['operating_profit', 'total_profit', 'net_profit']
+        is_highlight = key in ['operating_profit', 'total_profit', 'net_profit', 'profit_before_tax']
         rows += f'''
         <tr>
-            <td style="padding:7px 10px;font-size:12px;{'font-weight:600;color:#333' if is_highlight else ''}">{label}</td>
-            <td style="padding:7px 10px;font-size:12px;text-align:right;{'font-weight:600' if is_highlight else ''}">{_fmt_wan(v)}</td>
+            <td style="padding:5px 8px;font-size:13px;border:1px solid #e5e7eb;{'font-weight:600;color:#333;background:#f0fdf4' if is_highlight else ''}">{label}</td>
+            <td style="padding:5px 8px;font-size:13px;text-align:right;border:1px solid #e5e7eb;{'font-weight:600;background:#f0fdf4' if is_highlight else ''}">{_fmt_wan(v)}</td>
         </tr>'''
     
     return rows
 
 
 def _build_cash_flow_table(fin: Dict) -> str:
-    """构建现金流量表"""
+    """构建现金流量表
+    
+    注意：键名必须与 file_parser.py 的 CASHFLOW_MAP 输出保持一致
+    CASHFLOW_MAP 输出: cash_from_sales, tax_refund, other_operating_cash_in, operating_inflow,
+                     cash_paid_goods, cash_paid_staff, taxes_paid, other_operating_cash_out,
+                     operating_outflow, operating_cashflow, cash_from_investment,
+                     cash_from_invest_income, cash_from_asset_disposal, investing_cash_inflow,
+                     cash_for_assets, cash_for_investment, investing_cash_outflow,
+                     investing_cashflow, cash_from_borrowings, cash_from_equity,
+                     financing_cash_inflow, cash_for_debt, cash_for_dividends,
+                     financing_cash_outflow, financing_cashflow, net_cash_change,
+                     cash_end, cash_begin
+    """
     items = [
         ('销售商品、提供劳务收到的现金', 'cash_from_sales'),
         ('收到的税费返还', 'tax_refund'),
         ('收到其他与经营活动有关的现金', 'other_operating_cash_in'),
-        ('经营活动现金流入小计', 'operating_cash_inflow'),
-        ('购买商品、接受劳务支付的现金', 'cash_for_goods'),
-        ('支付给职工以及为职工支付的现金', 'cash_for_employees'),
+        ('经营活动现金流入小计', 'operating_inflow'),
+        ('购买商品、接受劳务支付的现金', 'cash_paid_goods'),
+        ('支付给职工以及为职工支付的现金', 'cash_paid_staff'),
         ('支付的各项税费', 'taxes_paid'),
         ('支付其他与经营活动有关的现金', 'other_operating_cash_out'),
-        ('经营活动现金流出小计', 'operating_cash_outflow'),
-        ('经营活动产生的现金流量净额', 'operating_cash_flow'),
+        ('经营活动现金流出小计', 'operating_outflow'),
+        ('经营活动产生的现金流量净额', 'operating_cashflow'),
         ('收回投资收到的现金', 'cash_from_investment'),
         ('取得投资收益收到的现金', 'cash_from_invest_income'),
         ('处置固定资产、无形资产收回的现金', 'cash_from_asset_disposal'),
@@ -368,28 +402,122 @@ def _build_cash_flow_table(fin: Dict) -> str:
         ('购建固定资产、无形资产支付的现金', 'cash_for_assets'),
         ('投资支付的现金', 'cash_for_investment'),
         ('投资活动现金流出小计', 'investing_cash_outflow'),
-        ('投资活动产生的现金流量净额', 'investing_cash_flow'),
+        ('投资活动产生的现金流量净额', 'investing_cashflow'),
         ('取得借款收到的现金', 'cash_from_borrowings'),
         ('筹资活动现金流入小计', 'financing_cash_inflow'),
         ('偿还债务支付的现金', 'cash_for_debt'),
         ('分配股利、利润或偿付利息支付的现金', 'cash_for_dividends'),
         ('筹资活动现金流出小计', 'financing_cash_outflow'),
-        ('筹资活动产生的现金流量净额', 'financing_cash_flow'),
-        ('现金及现金等价物净增加额', 'net_cash_increase'),
-        ('期末现金及现金等价物余额', 'ending_cash'),
+        ('筹资活动产生的现金流量净额', 'financing_cashflow'),
+        ('现金及现金等价物净增加额', 'net_cash_change'),
+        ('期末现金及现金等价物余额', 'cash_end'),
     ]
     
     rows = ''
     for label, key in items:
         v = fin.get(key)
-        is_highlight = key in ['operating_cash_flow', 'investing_cash_flow', 'financing_cash_flow', 'net_cash_increase', 'ending_cash']
+        is_highlight = key in ['operating_cashflow', 'investing_cashflow', 'financing_cashflow', 'net_cash_change', 'cash_end']
         rows += f'''
         <tr>
-            <td style="padding:7px 10px;font-size:12px;{'font-weight:600;color:#333' if is_highlight else ''}">{label}</td>
-            <td style="padding:7px 10px;font-size:12px;text-align:right;{'font-weight:600' if is_highlight else ''}">{_fmt_wan(v)}</td>
+            <td style="padding:5px 8px;font-size:13px;border:1px solid #e5e7eb;{'font-weight:600;color:#333;background:#fef3c7' if is_highlight else ''}">{label}</td>
+            <td style="padding:5px 8px;font-size:13px;text-align:right;border:1px solid #e5e7eb;{'font-weight:600;background:#fef3c7' if is_highlight else ''}">{_fmt_wan(v)}</td>
         </tr>'''
     
     return rows
+
+
+def _build_file_list_html(file_list: List[str], three_stmt: Optional[Dict] = None) -> str:
+    """构建文件清单HTML — 每个文件一张卡片，左右排列
+    
+    Args:
+        file_list: 文件路径列表
+        three_stmt: 三表数据（包含 sheet 信息）
+    """
+    if not file_list:
+        return ''
+
+    raw_sheets = three_stmt.get('raw_sheets', {}) if three_stmt else {}
+    bs = three_stmt.get('balance_sheet', {}) if three_stmt else {}
+    inc = three_stmt.get('income_statement', {}) if three_stmt else {}
+    cf = three_stmt.get('cash_flow', {}) if three_stmt else {}
+
+    def _sheet_type_tag(name: str) -> str:
+        sn = name.lower()
+        if '资产负债' in name or ('资产' in sn and '表' in sn):
+            return '<span style="background:#dbeafe;color:#1d4ed8;padding:1px 5px;border-radius:3px;font-size:10px">资产负债表</span>'
+        if '利润' in name:
+            return '<span style="background:#dcfce7;color:#15803d;padding:1px 5px;border-radius:3px;font-size:10px">利润表</span>'
+        if '现金流' in name or '现金流动' in name or '资金流量' in name:
+            return '<span style="background:#fef3c7;color:#b45309;padding:1px 5px;border-radius:3px;font-size:10px">现金流量表</span>'
+        return '<span style="background:#f3f4f6;color:#6b7280;padding:1px 5px;border-radius:3px;font-size:10px">其他</span>'
+
+    # ── 构建每个文件的卡片 ──
+    cards = ''
+    total_fields = len(bs) + len(inc) + len(cf)
+
+    for idx, f in enumerate(file_list):
+        fname = os.path.basename(f)
+        ext = f.lower().rsplit('.', 1)[-1] if '.' in f else ''
+        fmt = ext.upper() if ext else '—'
+        try:
+            fsize = os.path.getsize(f)
+            size_str = f'{fsize / 1024 / 1024:.1f} MB' if fsize >= 1048576 else f'{fsize / 1024:.0f} KB'
+        except Exception:
+            size_str = '—'
+
+        # 该文件的 Sheet 列表（表格形式）
+        sheet_rows = ''
+        for sname, rows_data in raw_sheets.items():
+            rows_count = len(rows_data)
+            cols_count = max((len(row) for row in rows_data), default=0)
+            tag = _sheet_type_tag(sname)
+            sheet_rows += f'''<tr>
+  <td style="padding:4px 8px;font-size:12px;border:1px solid #e5e7eb">{sname}</td>
+  <td style="padding:4px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:center">{tag}</td>
+  <td style="padding:4px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:center;color:#555">{rows_count} × {cols_count}</td>
+</tr>'''
+
+        sheet_table = ''
+        if sheet_rows:
+            sheet_table = f'''<table style="width:100%;border-collapse:collapse;margin-top:4px">
+  <thead><tr style="background:#f0f0f0">
+    <th style="padding:4px 8px;font-size:11px;text-align:left;border:1px solid #e5e7eb;color:#666">Sheet 名称</th>
+    <th style="padding:4px 8px;font-size:11px;text-align:center;border:1px solid #e5e7eb;color:#666">类型</th>
+    <th style="padding:4px 8px;font-size:11px;text-align:center;border:1px solid #e5e7eb;color:#666">行×列</th>
+  </tr></thead>
+  <tbody>{sheet_rows}</tbody>
+</table>'''
+
+        # 该文件提取的字段数
+        fields_html = ''
+        if total_fields > 0:
+            fields_html = f'<div style="margin-top:6px;font-size:12px;color:#059669;font-weight:500">✅ 已提取 {total_fields} 个字段</div>'
+
+        cards += f'''
+<div style="flex:1;min-width:240px;background:#fafafa;border-radius:8px;border-left:3px solid #4F46E5;padding:10px 12px">
+  <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+    <span style="font-size:16px">📊</span>
+    <span style="font-weight:600;font-size:14px;color:#222">{fname}</span>
+    <span style="font-size:12px;color:#999">{fmt} · {size_str}</span>
+  </div>
+  {sheet_table}
+  {fields_html}
+</div>'''
+
+    # ── 汇总标签 ──
+    summary = ''
+    if len(bs) > 0:
+        summary += f'<span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:4px;font-size:11px">资产 {len(bs)} 项</span> '
+    if len(inc) > 0:
+        summary += f'<span style="background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:4px;font-size:11px">利润 {len(inc)} 项</span> '
+    if len(cf) > 0:
+        summary += f'<span style="background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:4px;font-size:11px">现金流 {len(cf)} 项</span>'
+
+    return f'''
+<div class="card" style="border-left:4px solid #4F46E5">
+  <h2>📁 输入文件清单（共 {len(file_list)} 个文件参与分析）{summary}</h2>
+  <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap">{cards}</div>
+</div>'''
 
 
 def _build_industry_benchmark(industry: str) -> str:
@@ -450,165 +578,103 @@ def _build_industry_benchmark(industry: str) -> str:
 </div>'''
 
 
-def generate_report(
-    company_name: str,
-    industry: str,
-    metrics: Dict,
-    score_result: Dict,
-    fin: Dict,
-    fin_prev: Optional[Dict],
-    tax: Dict,
-    file_list: List[str],
-    periods: List[str],
-    period_details: Dict,
-    output_path: str,
-    analysis_notes: Optional[List[str]] = None,
-    period_info: Optional[Dict] = None,
-    three_stmt: Optional[Dict] = None,
-    consistency_result: Optional[List[Dict]] = None,
-):
-    """
-    生成授信决策报告 v3.0
-    
-    新增参数:
-        three_stmt: 三表原始数据（资产负债表/利润表/现金流量表）
-        consistency_result: 勾稽校验结果
-    """
-    now = datetime.now().strftime('%Y年%m月%d日 %H:%M')
-    grade = score_result['grade']
-    total_score = score_result['total_score']
-    suggestion = score_result['suggestion']
-    g_color = GRADE_COLOR.get(score_result['color'], GRADE_COLOR['yellow'])
-    dim_scores = score_result['dimension_scores']
-    weights = score_result['weights']
-
-    dim_labels = {
-        'solvency': '偿债能力', 'profitability': '盈利能力',
-        'cashflow': '现金流质量', 'operations': '营运能力',
-        'tax_compliance': '税务合规', 'fraud_alert': '造假预警',
-    }
-
-    # ── 雷达图数据 ──
-    radar_labels = [dim_labels.get(d, d) for d in dim_scores]
-    radar_values = [dim_scores[d] for d in dim_scores]
-    radar_js = json.dumps({'labels': radar_labels, 'values': radar_values})
-
-    # ── 跨期对比图数据 ──
-    compare_chart_js = _build_compare_chart_data(periods, period_details)
-
-    # ── 文件列表 ──
-    has_tax_data = bool(tax and any(tax.values()))
-    display_files = []
-    for f in file_list:
-        ext = f.lower()
-        if ext.endswith('.pdf'):
-            if has_tax_data:
-                display_files.append(f)
-        else:
-            display_files.append(f)
-
-    file_items = ''.join(
-        f'<li style="padding:2px 0;font-size:12px;color:#555">'
-        f'{"📊" if f.endswith(".xlsx") or f.endswith(".xls") else "📄"} '
-        f'{os.path.basename(f)}</li>'
-        for f in display_files
-    )
-
-    # ── 期间类型标签 ──
+def _build_period_type_info(periods: List[str], period_details: Dict) -> Tuple[str, str]:
+    """构建期间类型标签和详情（紧凑版，适合表格内嵌）"""
     period_badges = ''
     period_type_info = ''
-    
+
+    type_icons = {
+        'annual': ('📊', '#059669'),
+        'quarterly': ('📈', '#2563EB'),
+        'monthly': ('📅', '#7C3AED'),
+        'unknown': ('❓', '#6B7280'),
+    }
+
     for p in periods:
         d = period_details.get(p, {})
-        fname = os.path.basename(d.get('filepath', p))
         pi = d.get('period_info', {})
         report_type = pi.get('report_type', 'unknown')
         confidence = pi.get('confidence', 0)
-        
-        type_icons = {
-            'annual': ('📊', '#059669'),
-            'quarterly': ('📈', '#2563EB'),
-            'monthly': ('📅', '#7C3AED'),
-            'unknown': ('❓', '#6B7280'),
-        }
+
         icon, color = type_icons.get(report_type, type_icons['unknown'])
-        
         period_badges += f'<span style="background:#EEF2FF;color:{color};padding:3px 10px;border-radius:12px;font-size:12px;margin-right:6px">{icon} {p}</span>'
-        
+
         if report_type != 'unknown':
             ann_factor = pi.get('annualization_factor', 1.0)
             note = pi.get('note', '')
-            period_type_info += f'''
-            <div style="margin:8px 0;padding:10px;background:#F9FAFB;border-radius:8px;font-size:12px">
-                <div style="font-weight:600;color:{color};margin-bottom:4px">
-                    {icon} {p} → <span style="background:{color};color:#fff;padding:1px 6px;border-radius:4px">{report_type.upper()}</span>
-                    <span style="color:#6B7280;font-weight:normal"> (置信度 {confidence:.0%})</span>
-                </div>
-                <div style="color:#4B5563">{note}</div>
-                {'<div style="color:#059669;margin-top:4px">⚙️ 年化因子: ×' + f'{ann_factor:.1f}' + ' (已应用年化折算)</div>' if ann_factor != 1.0 and report_type != 'annual' else ''}
-            </div>'''
+            ann_tag = f' <span style="color:#059669;font-size:11px">×{ann_factor:.1f}年化</span>' if ann_factor != 1.0 and report_type != 'annual' else ''
+            period_type_info += f'<span style="color:{color};font-weight:500">{icon} {p}→{report_type.upper()}</span> <span style="color:#888;font-size:11px">({confidence:.0%})</span>{ann_tag}'
 
-    # ── 分析说明 ──
-    cross_period_notes = ''
-    if analysis_notes:
-        cross_period_notes = '''
+    return period_badges, period_type_info
+
+
+def _build_analysis_notes_html(analysis_notes: Optional[List[str]]) -> str:
+    """构建分析说明HTML"""
+    if not analysis_notes:
+        return ''
+
+    notes_html = '\n'.join(f'<div style="color:#78350F;margin:4px 0;font-size:13px">• {n}</div>' for n in analysis_notes)
+    return f'''
         <div style="margin:16px 0;padding:12px;background:#FEF3C7;border-radius:8px;border-left:4px solid #F59E0B">
             <div style="font-weight:600;color:#92400E;margin-bottom:8px">📋 分析说明</div>
-            ''' + '\n'.join(f'<div style="color:#78350F;margin:4px 0;font-size:13px">• {n}</div>' for n in analysis_notes) + '''
+            {notes_html}
         </div>'''
 
-    # ── 各维度分析块 ──
-    sections = _build_sections(metrics, dim_labels)
 
-    # ── 跨期趋势分析块 ──
-    trend_section = _build_trend_section(metrics, periods)
-
-    # ── 核心KPI卡片 ──
+def _build_kpi_cards(fin: Dict, metrics: Dict, fin_prev: Optional[Dict], periods: List[str]) -> str:
+    """构建核心KPI表格行"""
     latest_period = periods[-1] if periods else ''
     kpi_items = [
         ('total_assets',     '资产总额',       '元'),
-        ('revenue',          f'营业收入\n({latest_period})',  '元'),
-        ('net_profit',       f'净利润\n({latest_period})',        '元'),
+        ('total_equity',     '所有者权益',     '元'),
+        ('revenue',          '营业收入',       '元'),
+        ('net_profit',       '净利润',         '元'),
         ('current_ratio',    '流动比率',       '倍'),
         ('debt_ratio',       '资产负债率',     '%'),
         ('roe',              'ROE',            '%'),
-        ('gross_profit_margin', '毛利率',       '%'),
-        ('total_equity',     '所有者权益',     '元'),
+        ('gross_profit_margin', '毛利率',      '%'),
     ]
-    kpi_cards = ''
+
+    rows = ''
     for key, label, unit in kpi_items:
         v = fin.get(key) if fin.get(key) is not None else metrics.get(key, {}).get('value')
         is_pct = unit == '%'
         val_str = _fmt(v, unit, pct=is_pct)
-        trend_arrow = ''
+
+        trend_html = ''
         if fin_prev and key in fin_prev and v is not None:
             prev_v = fin_prev.get(key) or metrics.get(key, {}).get('value')
             if prev_v and abs(prev_v) > 1e-6:
                 chg = (v - prev_v) / abs(prev_v)
                 if chg > 0.01:
-                    trend_arrow = f'<span style="color:#1D9E75;font-size:11px">↑{chg*100:.1f}%</span>'
+                    trend_html = f'<span style="color:#1D9E75;font-size:10px;margin-left:4px">↑{chg*100:.1f}%</span>'
                 elif chg < -0.01:
-                    trend_arrow = f'<span style="color:#D85A30;font-size:11px">↓{abs(chg)*100:.1f}%</span>'
-        label_clean = label.replace('\n', '<br>')
-        kpi_cards += f'''
-<div style="background:#f8f9fa;border-radius:8px;padding:14px 16px;min-width:130px">
-  <div style="font-size:12px;color:#888;margin-bottom:4px">{label_clean}</div>
-  <div style="font-size:16px;font-weight:500;color:#222">{val_str}</div>
-  {f'<div style="margin-top:3px">{trend_arrow}</div>' if trend_arrow else ''}
-</div>'''
+                    trend_html = f'<span style="color:#D85A30;font-size:10px;margin-left:4px">↓{abs(chg)*100:.1f}%</span>'
 
-    # ── 警示清单 ──
+        rows += f'''
+        <tr>
+          <td style="color:#888;padding:3px 0;width:80px">{label}</td>
+          <td style="font-weight:500;padding:3px 0">{val_str}{trend_html}</td>
+        </tr>'''
+
+    return rows
+
+
+def _build_alert_table(metrics: Dict) -> str:
+    """构建风险预警表格"""
     all_alerts = []
     for key, m in metrics.items():
         for rule in m.get('triggered_rules', []):
             all_alerts.append((m['label'], rule))
 
+    if not all_alerts:
+        return '<tr><td colspan="4" style="text-align:center;padding:20px;color:#888;font-size:13px">✅ 未触发任何风险预警规则</td></tr>'
+
     alert_html = ''
-    if all_alerts:
-        for metric_label, rule in all_alerts:
-            lvl = rule.get('risk_level', 'LOW')
-            _, tc, bc = RISK_LEVEL_MAP.get(lvl, RISK_LEVEL_MAP['LOW'])
-            alert_html += f'''
+    for metric_label, rule in all_alerts:
+        lvl = rule.get('risk_level', 'LOW')
+        _, tc, bc = RISK_LEVEL_MAP.get(lvl, RISK_LEVEL_MAP['LOW'])
+        alert_html += f'''
 <tr>
   <td style="padding:8px;border-bottom:0.5px solid #eee;font-size:12px">{metric_label}</td>
   <td style="padding:8px;border-bottom:0.5px solid #eee">
@@ -617,23 +683,20 @@ def generate_report(
   <td style="padding:8px;border-bottom:0.5px solid #eee;font-size:12px">[{rule['id']}] {rule['name']}</td>
   <td style="padding:8px;border-bottom:0.5px solid #eee;font-size:12px;color:#555">{rule['regulation']}</td>
 </tr>'''
-    else:
-        alert_html = '<tr><td colspan="4" style="text-align:center;padding:20px;color:#888;font-size:13px">✅ 未触发任何风险预警规则</td></tr>'
 
-    # ── 授信额度估算 ──
-    total_equity_v = fin.get('total_equity', 0) or 0
+    return alert_html
+
+
+def _build_guarantee_note(industry: str, fin: Dict) -> str:
+    """构建担保行业专项说明"""
+    if industry != '担保/金融服务':
+        return ''
+
+    deposit_out = fin.get('deposit_out', 0) or 0
+    paid_capital = fin.get('paid_in_capital', 0) or 0
     total_assets_v = fin.get('total_assets', 0) or 0
-    revenue_v      = fin.get('revenue', 0) or 0
-    annual_rev     = revenue_v * 4 if latest_period.endswith('-03') else revenue_v
 
-    credit_estimate = _build_credit_estimate(total_score, total_assets_v, annual_rev, total_equity_v)
-
-    # ── 担保行业专项说明 ──
-    guarantee_note = ''
-    if industry == '担保/金融服务':
-        deposit_out = fin.get('deposit_out', 0) or 0
-        paid_capital = fin.get('paid_in_capital', 0) or 0
-        guarantee_note = f'''
+    return f'''
 <div class="card" style="border-left:4px solid #4F46E5">
   <h2>🏛️ 担保公司专项监管指标</h2>
   <div style="display:flex;flex-wrap:wrap;gap:20px;margin-top:8px">
@@ -660,22 +723,14 @@ def generate_report(
   </div>
 </div>'''
 
-    # ═══════════════════════════════════════════════
-    # v3.0 新增模块
-    # ═══════════════════════════════════════════════
-    
-    # 三表勾稽校验
-    consistency_html = _build_consistency_check_html(three_stmt or {}, consistency_result or [])
-    
-    # M-Score 详细
-    mscore_html = _build_mscore_detail_html(metrics)
-    
-    # 知识库评判
-    knowledge_base_html = _build_knowledge_base_section(metrics)
-    
-    # 资产负债表
+
+def _build_financial_tables(three_stmt: Optional[Dict], fin: Dict) -> Tuple[str, str, str]:
+    """构建三表HTML"""
+    if not three_stmt:
+        return '', '', ''
+
     balance_sheet_html = ''
-    if three_stmt and three_stmt.get('balance_sheet'):
+    if three_stmt.get('balance_sheet'):
         balance_sheet_html = f'''
 <div class="card">
   <h2>📊 资产负债表</h2>
@@ -683,30 +738,110 @@ def generate_report(
     {_build_balance_sheet_table(fin)}
   </div>
 </div>'''
-    
-    # 利润表
+
+    # 利润表 + 现金流量表并排
     income_stmt_html = ''
-    if three_stmt and three_stmt.get('income_statement'):
+    cash_flow_html = ''
+    inc_table = _build_income_statement_table(fin) if three_stmt.get('income_statement') else ''
+    cf_table = _build_cash_flow_table(fin) if three_stmt.get('cash_flow') else ''
+
+    if inc_table or cf_table:
+        side_by_side = ''
+        if inc_table:
+            side_by_side += f'''
+    <div style="flex:1;min-width:0">
+      <h3 style="font-size:13px;font-weight:600;color:#333;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb">📈 利润表</h3>
+      <table style="width:100%;border-collapse:collapse">
+        <tbody>{inc_table}</tbody>
+      </table>
+    </div>'''
+        if cf_table:
+            side_by_side += f'''
+    <div style="flex:1;min-width:0">
+      <h3 style="font-size:13px;font-weight:600;color:#333;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb">💵 现金流量表</h3>
+      <table style="width:100%;border-collapse:collapse">
+        <tbody>{cf_table}</tbody>
+      </table>
+    </div>'''
+
         income_stmt_html = f'''
 <div class="card">
-  <h2>📈 利润表</h2>
-  <table style="margin-top:8px">
-    <tbody>{_build_income_statement_table(fin)}</tbody>
-  </table>
+  <h2>📈💵 利润表 & 现金流量表</h2>
+  <div style="display:flex;gap:24px;margin-top:8px">{side_by_side}
+  </div>
 </div>'''
-    
-    # 现金流量表
-    cash_flow_html = ''
-    if three_stmt and three_stmt.get('cash_flow'):
-        cash_flow_html = f'''
-<div class="card">
-  <h2>💵 现金流量表</h2>
-  <table style="margin-top:8px">
-    <tbody>{_build_cash_flow_table(fin)}</tbody>
-  </table>
-</div>'''
-    
-    # 行业基准
+        cash_flow_html = ''  # 已合并，不再单独输出
+
+    return balance_sheet_html, income_stmt_html, cash_flow_html
+
+
+def generate_report(
+    company_name: str,
+    industry: str,
+    metrics: Dict,
+    score_result: Dict,
+    fin: Dict,
+    fin_prev: Optional[Dict],
+    tax: Dict,
+    file_list: List[str],
+    periods: List[str],
+    period_details: Dict,
+    output_path: str,
+    analysis_notes: Optional[List[str]] = None,
+    period_info: Optional[Dict] = None,
+    three_stmt: Optional[Dict] = None,
+    consistency_result: Optional[List[Dict]] = None,
+):
+    """
+    生成授信决策报告 v3.0
+    """
+    now = datetime.now().strftime('%Y年%m月%d日 %H:%M')
+    grade = score_result['grade']
+    total_score = score_result['total_score']
+    suggestion = score_result['suggestion']
+    g_color = GRADE_COLOR.get(score_result['color'], GRADE_COLOR['yellow'])
+    dim_scores = score_result['dimension_scores']
+    weights = score_result['weights']
+
+    dim_labels = {
+        'solvency': '偿债能力', 'profitability': '盈利能力',
+        'cashflow': '现金流质量', 'operations': '营运能力',
+        'tax_compliance': '税务合规', 'fraud_alert': '造假预警',
+    }
+
+    # 雷达图数据
+    radar_labels = [dim_labels.get(d, d) for d in dim_scores]
+    radar_values = [dim_scores[d] for d in dim_scores]
+    radar_js = json.dumps({'labels': radar_labels, 'values': radar_values})
+
+    # 跨期对比图数据
+    compare_chart_js = _build_compare_chart_data(periods, period_details)
+
+    # 构建各组件
+    period_badges, period_type_info = _build_period_type_info(periods, period_details)
+    cross_period_notes = _build_analysis_notes_html(analysis_notes)
+    sections = _build_sections(metrics, dim_labels)
+    trend_section = _build_trend_section(metrics, periods, period_details)
+    kpi_cards = _build_kpi_cards(fin, metrics, fin_prev, periods)
+    alert_html = _build_alert_table(metrics)
+
+    # 授信额度估算
+    total_equity_v = fin.get('total_equity', 0) or 0
+    total_assets_v = fin.get('total_assets', 0) or 0
+    revenue_v = fin.get('revenue', 0) or 0
+    latest_period = periods[-1] if periods else ''
+    annual_rev = revenue_v * 4 if latest_period.endswith('-03') else revenue_v
+    credit_estimate = _build_credit_estimate(total_score, total_assets_v, annual_rev, total_equity_v)
+
+    # 担保行业专项
+    guarantee_note = _build_guarantee_note(industry, fin)
+
+    # v3.0 新增模块
+    file_list_html = _build_file_list_html(file_list, three_stmt or {})
+    consistency_html = _build_consistency_check_html(three_stmt or {}, consistency_result or [])
+    mscore_html = _build_mscore_detail_html(metrics)
+    knowledge_base_html = _build_knowledge_base_section(metrics)
+    balance_sheet_html, income_stmt_html, cash_flow_html = _build_financial_tables(three_stmt, fin)
     benchmark_html = _build_industry_benchmark(industry)
 
     html = f'''<!DOCTYPE html>
@@ -736,53 +871,64 @@ th{{font-size:12px;font-weight:500;color:#666;padding:8px;background:#f8f9fa;
 <body>
 <div class="container">
 
-<!-- ══ 封面 ══ -->
-<div class="card">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+<!-- ══ 封面 + 核心指标（双栏表格布局）══ -->
+<div class="card" style="padding:0;overflow:hidden">
+  <!-- 顶部标题栏 -->
+  <div style="background:linear-gradient(135deg,#1e293b,#334155);color:#fff;padding:16px 24px;
+       display:flex;justify-content:space-between;align-items:center">
     <div>
-      <div style="font-size:12px;color:#888;margin-bottom:4px">银行信贷风险部 · 授信决策报告 <span class="version-badge">v3.0</span></div>
-      <h1>📊 {company_name} 财务风险分析报告</h1>
-      <div style="margin-top:6px;font-size:13px;color:#666">
-        行业分类：<b>{industry}</b> &nbsp;|&nbsp; 分析时间：{now}
+      <div style="font-size:12px;opacity:0.7;margin-bottom:2px">银行信贷风险部 · 授信决策报告 <span style="background:rgba(255,255,255,0.15);padding:2px 8px;border-radius:8px;font-size:10px">v3.0</span></div>
+      <div style="font-size:18px;font-weight:600">📊 {company_name}</div>
+      <div style="font-size:13px;opacity:0.8;margin-top:4px">
+        {industry} &nbsp;·&nbsp; {now} &nbsp;·&nbsp; {period_badges}
       </div>
-      <div style="margin-top:8px">{period_badges}</div>
     </div>
-    <div style="text-align:center;min-width:130px">
-      <div style="font-size:44px;font-weight:600;color:{g_color[0]};
-           background:{g_color[1]};border:2px solid {g_color[2]};
-           border-radius:12px;padding:8px 24px;line-height:1.2">
-        {grade}</div>
-      <div style="font-size:13px;color:{g_color[0]};margin-top:4px;font-weight:500">{total_score:.1f} 分</div>
+    <div style="text-align:center">
+      <div style="font-size:42px;font-weight:700;color:{g_color[2]};line-height:1.1">{grade}</div>
+      <div style="font-size:22px;font-weight:600;margin-top:2px">{total_score:.1f}<span style="font-size:12px;opacity:0.7">分</span></div>
     </div>
   </div>
-  <div style="margin-top:16px;padding:12px 16px;background:{g_color[1]};border-radius:8px;
-       border-left:4px solid {g_color[0]}">
-    <b style="color:{g_color[0]}">授信建议：</b>
-    <span style="color:{g_color[0]};font-size:14px">{suggestion}</span>
+
+  <!-- 授信建议条 -->
+  <div style="padding:10px 24px;background:{g_color[1]};border-bottom:1px solid #e5e7eb">
+    <b style="color:{g_color[0]};font-size:13px">💡 授信建议：</b>
+    <span style="color:{g_color[0]};font-size:13px">{suggestion}</span>
+    <span style="margin-left:16px;font-size:12px;color:#555">{credit_estimate}</span>
   </div>
-  <div style="margin-top:12px;font-size:13px;color:#555;line-height:1.8">{credit_estimate}</div>
+
+  <!-- 双栏表格区 -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #e5e7eb">
+    <!-- 左栏：企业信息 + 期间识别 -->
+    <div style="padding:16px 24px;border-right:1px solid #e5e7eb">
+      <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:10px">📋 企业信息</div>
+      <table style="width:100%;font-size:12px">
+        <tr><td style="color:#888;padding:4px 0;width:80px">企业名称</td><td style="font-weight:500;padding:4px 0">{company_name}</td></tr>
+        <tr><td style="color:#888;padding:4px 0">行业分类</td><td style="font-weight:500;padding:4px 0">{industry}</td></tr>
+        <tr><td style="color:#888;padding:4px 0">分析期间</td><td style="padding:4px 0">{'、'.join(periods) if periods else '—'}</td></tr>
+        <tr><td style="color:#888;padding:4px 0">报告类型</td><td style="padding:4px 0">{period_type_info}</td></tr>
+      </table>
+    </div>
+
+    <!-- 右栏：核心财务指标 -->
+    <div style="padding:16px 24px">
+      <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:10px">
+        📌 核心指标 {f'<span style="font-size:11px;color:#888;font-weight:400">（{latest_period}）</span>' if latest_period else ''}
+      </div>
+      <table style="width:100%;font-size:12px">
+        {kpi_cards}
+      </table>
+    </div>
+  </div>
 </div>
 
-<!-- ══ 期间类型识别 v3.0 ══ -->
-{period_type_info}
+<!-- ══ 分析说明 ══ -->
 {cross_period_notes}
 
 <!-- ══ 担保专项 ══ -->
 {guarantee_note}
 
-<!-- ══ 输入文件 ══ -->
-<div class="card">
-  <h2>📁 输入文件清单</h2>
-  <ul style="list-style:none;columns:2">{file_items}</ul>
-</div>
-
-<!-- ══ 核心指标卡 ══ -->
-<div class="card">
-  <h2>📌 核心财务指标概览
-    {f'<span style="font-size:12px;color:#888;font-weight:400">（最新期：{latest_period}）</span>' if latest_period else ''}
-  </h2>
-  <div style="display:flex;flex-wrap:wrap;gap:12px">{kpi_cards}</div>
-</div>
+<!-- ══ 增强版输入文件清单 ══ -->
+{file_list_html}
 
 <!-- ══ 六维评分雷达 ══ -->
 <div class="card">
@@ -807,15 +953,8 @@ th{{font-size:12px;font-weight:500;color:#666;padding:8px;background:#f8f9fa;
 </div>
 
 <!-- ══ v3.0 新增模块 ══ -->
-
-<!-- 三表勾稽校验 -->
 {consistency_html}
-
-<!-- M-Score 详细计算 -->
 {mscore_html}
-
-<!-- 知识库评判完整展示 -->
-{knowledge_base_html}
 
 <!-- ══ 跨期对比图 ══ -->
 {_build_compare_chart_html(periods, period_details, compare_chart_js) if len(periods) > 1 else ''}
@@ -844,6 +983,9 @@ th{{font-size:12px;font-weight:500;color:#666;padding:8px;background:#f8f9fa;
 
 <!-- ══ 跨期趋势分析 ══ -->
 {trend_section}
+
+<!-- ══ 知识库评判结果 ══ -->
+{knowledge_base_html}
 
 <!-- ══ 信用评级说明（三级九等） ══ -->
 <div class="card">
@@ -1203,7 +1345,7 @@ def _build_sections(metrics: Dict, dim_labels: Dict) -> str:
 # 跨期趋势分析块
 # ─────────────────────────────────────────────
 
-def _build_trend_section(metrics: Dict, periods: List[str]) -> str:
+def _build_trend_section(metrics: Dict, periods: List[str], period_details: Dict = None) -> str:
     trend_metrics = {k: v for k, v in metrics.items() if v.get('trend_type')}
     if not trend_metrics:
         return ''
@@ -1246,13 +1388,30 @@ def _build_trend_section(metrics: Dict, periods: List[str]) -> str:
     if not rows:
         return ''
 
+    # 动态生成趋势说明（基于实际期间信息，不再硬编码年份）
+    trend_note = '趋势指标基于两期实际数据计算，仅供参考'
+    if period_details and len(periods) >= 2:
+        note_parts = []
+        new_pi = (period_details.get(periods[-1], {}) or {}).get('period_info', {})
+        old_pi = (period_details.get(periods[0], {}) or {}).get('period_info', {})
+        new_type = new_pi.get('report_type', '')
+        old_type = old_pi.get('report_type', '')
+        new_factor = new_pi.get('annualization_factor', 1.0)
+        if new_factor > 1.0 and new_type == 'quarterly':
+            q_num = int(12 / new_factor)
+            note_parts.append(f'最新期（Q{q_num}）收入/利润数据已按 ×{new_factor:.1f} 年化折算')
+        if old_type == 'annual' and new_type == 'quarterly':
+            note_parts.append(f'与上期（{periods[0]}，年度）跨期对比')
+        if note_parts:
+            trend_note = '；'.join(note_parts) + '，仅供参考'
+
     return f'''
 <div class="card">
   <h2>📊 跨期趋势分析
     {f'<span style="font-size:12px;color:#888;font-weight:400">（{period_label}）</span>' if period_label else ''}
   </h2>
   <p style="font-size:12px;color:#888;margin-bottom:12px">
-    注：收入/利润趋势指标以2026年Q1数据折年化（×4）与2025年全年对比，仅供参考
+    注：{trend_note}
   </p>
   <table>
     <thead><tr>

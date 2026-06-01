@@ -46,6 +46,18 @@ def generate_html_report(
 
     # 调用 risk_engine 的报告生成器
     try:
+        # 从 period_details 中提取文件路径列表
+        file_list = []
+        period_details = analysis_result.get('period_details', {})
+        for period_data in period_details.values():
+            filepath = period_data.get('filepath', '')
+            if filepath and filepath not in file_list:
+                file_list.append(filepath)
+        
+        # 如果仍为空，尝试从 analysis_result 直接获取
+        if not file_list:
+            file_list = analysis_result.get('file_list', [])
+        
         report_path = rg_generate(
             company_name=company_name,
             industry=industry,
@@ -61,12 +73,14 @@ def generate_html_report(
             fin=analysis_result.get('financial', {}),
             fin_prev=None,
             tax=analysis_result.get('tax', {}),
-            file_list=[],
+            file_list=file_list,
             periods=analysis_result.get('periods', []),
-            period_details=analysis_result.get('period_details', {}),
+            period_details=period_details,
             output_path=output_path,
             analysis_notes=analysis_result.get('analysis_notes', []),
             period_info=analysis_result.get('period_info', {}),
+            three_stmt=analysis_result.get('three_stmt'),
+            consistency_result=analysis_result.get('consistency_result', []),
         )
         return report_path
     except Exception as e:
