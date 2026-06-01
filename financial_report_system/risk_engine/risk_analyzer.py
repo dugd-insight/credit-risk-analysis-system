@@ -457,8 +457,9 @@ def _calculate_fraud_alerts(f: Dict, fp: Optional[Dict]) -> Dict:
     metrics = {}
 
     # Beneish M-Score
-    m_score = _calculate_m_score(f, fp if fp else None)
-    if m_score is not None:
+    m_result = _calculate_m_score(f, fp if fp else None)
+    if m_result is not None:
+        m_score = m_result['m_score']
         metrics['m_score'] = {
             'label': 'Beneish M-Score（造假预警）',
             'value': m_score,
@@ -466,6 +467,15 @@ def _calculate_fraud_alerts(f: Dict, fp: Optional[Dict]) -> Dict:
             'benchmark': '< -1.78（安全）',
             'score': 100 if m_score < MSCORE_SAFE else (50 if m_score < MSCORE_DANGER else 0),
             'triggered_rules': get_triggered_rules('m_score', m_score),
+            # 8 因子详情
+            'DSRI': m_result['DSRI'],
+            'GMI': m_result['GMI'],
+            'AQI': m_result['AQI'],
+            'SGI': m_result['SGI'],
+            'DEPI': m_result['DEPI'],
+            'SGAI': m_result['SGAI'],
+            'TATA': m_result['TATA'],
+            'LVGI': m_result['LVGI'],
         }
 
     return metrics
@@ -775,7 +785,17 @@ def _calculate_m_score(f: Dict, f_prev: Optional[Dict] = None) -> Optional[float
              + BENEISH_COEFFICIENTS['tata'] * tata
              + BENEISH_COEFFICIENTS['lvgi'] * lvgi)
 
-        return round(m, 3)
+        return {
+            'm_score': round(m, 3),
+            'DSRI': round(dsri, 4),
+            'GMI': round(gmi, 4),
+            'AQI': round(aqi, 4),
+            'SGI': round(sgi, 4),
+            'DEPI': round(depi, 4),
+            'SGAI': round(sgai, 4),
+            'TATA': round(tata, 4),
+            'LVGI': round(lvgi, 4),
+        }
     except Exception:
         return None
 
