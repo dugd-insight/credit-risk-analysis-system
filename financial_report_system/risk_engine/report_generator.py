@@ -130,37 +130,39 @@ def _build_mscore_detail_html(metrics: Dict) -> str:
     ms = metrics.get('m_score', {})
     if not ms or ms.get('value') is None:
         return ''
-    
+
     value = ms.get('value', 0)
     interpretation = '财务造假可能性低' if value < -2.22 else ('财务造假可能性高' if value > -1.78 else '无法判断')
     interp_color = '#1a6b3a' if value < -2.22 else ('#7a1010' if value > -1.78 else '#854f0b')
-    
-    # 各因子详情
+
+    # 各因子详情 + 公式说明
     factors = [
-        ('DSRI', '应收账款指数', ms.get('DSRI')),
-        ('GMI', '毛利率指数', ms.get('GMI')),
-        ('AQI', '资产质量指数', ms.get('AQI')),
-        ('SGI', '营收增长指数', ms.get('SGI')),
-        ('DEPI', '折旧指数', ms.get('DEPI')),
-        ('SGAI', '销管费用指数', ms.get('SGAI')),
-        ('TATA', '应计利润比率', ms.get('TATA')),
-        ('LVGI', '财务杠杆指数', ms.get('LVGI')),
+        ('DSRI', '应收账款指数', ms.get('DSRI'), '= (当期应收/收入) ÷ (上期应收/收入)'),
+        ('GMI', '毛利率指数', ms.get('GMI'), '= 上期毛利率 ÷ 当期毛利率'),
+        ('AQI', '资产质量指数', ms.get('AQI'), '= (1 - 长期资产/总资产) 当期 ÷ 上期'),
+        ('SGI', '营收增长指数', ms.get('SGI'), '= 当期收入 ÷ 上期收入'),
+        ('DEPI', '折旧指数', ms.get('DEPI'), '= 上期折旧率 ÷ 当期折旧率'),
+        ('SGAI', '销管费用指数', ms.get('SGAI'), '= (当期销管费/收入) ÷ (上期销管费/收入)'),
+        ('TATA', '应计利润比率', ms.get('TATA'), '= (净利润 - 经营现金流) ÷ 总资产'),
+        ('LVGI', '财务杠杆指数', ms.get('LVGI'), '= 当期负债率 ÷ 上期负债率'),
     ]
-    
+
     factors_html = ''
-    for fid, fname, fval in factors:
+    for fid, fname, fval, formula in factors:
         if fval is None:
             continue
-        # 判断因子是否异常（偏离1.0较多）
         is_abnormal = fval > 1.1 or fval < 0.9
         color = '#D85A30' if is_abnormal else '#555'
         arrow = '↑' if fval > 1.0 else ('↓' if fval < 1.0 else '→')
         factors_html += f'''
-        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:0.5px solid #f0f0f0">
-            <span style="font-weight:500;color:#333">{fid} - {fname}</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid #f0f0f0">
+            <div>
+                <span style="font-weight:500;color:#333">{fid} - {fname}</span>
+                <span style="font-size:11px;color:#999;margin-left:8px">{formula}</span>
+            </div>
             <span style="color:{color};font-weight:500">{arrow} {fval:.4f}</span>
         </div>'''
-    
+
     return f'''
 <div class="card" style="border-left:4px solid #7C3AED">
   <h2>🎯 Beneish M-Score 财务造假预警（8因子模型）</h2>
@@ -168,10 +170,17 @@ def _build_mscore_detail_html(metrics: Dict) -> str:
     <div style="text-align:center;padding:20px;background:#f8f9fa;border-radius:12px">
       <div style="font-size:36px;font-weight:600;color:{interp_color}">{value:.2f}</div>
       <div style="font-size:14px;margin-top:8px;color:{interp_color}">{interpretation}</div>
-      <div style="font-size:11px;color:#888;margin-top:8px">
-        <div>模型阈值说明：</div>
-        <div>M-Score &lt; -2.22 → 正常</div>
-        <div>M-Score &gt; -1.78 → 高度怀疑</div>
+      <div style="font-size:11px;color:#888;margin-top:12px;line-height:1.8">
+        <div style="font-weight:500;margin-bottom:4px">模型阈值：</div>
+        <div>M &lt; -2.22 → 正常</div>
+        <div>-2.22 ~ -1.78 → 警示区间</div>
+        <div>M &gt; -1.78 → 高度怀疑</div>
+      </div>
+      <div style="font-size:10px;color:#aaa;margin-top:10px;border-top:1px solid #eee;padding-top:8px">
+        <div style="font-weight:500;margin-bottom:2px">计算公式</div>
+        <div>M = -4.84 + 0.92×DSRI + 0.53×GMI</div>
+        <div>+ 0.40×AQI + 0.89×SGI + 0.12×DEPI</div>
+        <div>- 0.17×SGAI + 4.68×TATA - 0.33×LVGI</div>
       </div>
     </div>
     <div style="background:#fff;border:0.5px solid #e5e7eb;border-radius:8px;padding:12px">

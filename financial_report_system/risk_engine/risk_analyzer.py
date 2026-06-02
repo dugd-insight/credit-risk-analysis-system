@@ -310,11 +310,31 @@ def _calculate_cashflow_metrics(f: Dict, fp: Dict) -> Dict:
     cf_is_estimated = False
     if operating_cashflow == 0 and net_profit:
         depreciation = f.get('depreciation', 0) or 0
-        amortization = f.get('amortization', 0) or (f.get('long_term_prepaid', 0) or 0) * 0.1
-        ar_prev = fp.get('accounts_receivable', 0) or 0 if fp else 0
-        ar_curr = f.get('accounts_receivable', 0) or 0
-        ar_change = ar_curr - ar_prev
-        estimated_cf = net_profit + depreciation + amortization - ar_change
+        amortization = f.get('amortization', 0) or (f.get('long_term_deferred_expense', 0) or 0) * 0.1
+
+        def _change(key):
+            """计算两期变动（当期 - 上期），正值表示增加"""
+            curr = f.get(key, 0) or 0
+            prev = (fp.get(key, 0) or 0) if fp else 0
+            return curr - prev
+
+        # 经营性资产变动（增加=现金流出，取负号）
+        ar_change = _change('accounts_receivable')       # 应收增加 → 现金流出
+        inv_change = _change('inventory')                 # 存货增加 → 现金流出
+        prepaid_change = _change('prepaid_accounts')      # 预付增加 → 现金流出
+        other_recv_change = _change('other_receivables')  # 其他应收增加 → 现金流出
+
+        # 经营性负债变动（增加=现金流入）
+        ap_change = _change('accounts_payable')           # 应付增加 → 现金流入
+        advance_change = _change('advance_receipts')      # 预收增加 → 现金流入
+        wages_change = _change('wages_payable')           # 应付薪酬增加 → 现金流入
+        tax_change = _change('taxes_payable')             # 应交税金增加 → 现金流入
+        other_pay_change = _change('other_payables')      # 其他应付增加 → 现金流入
+
+        estimated_cf = (net_profit
+                        + depreciation + amortization
+                        - ar_change - inv_change - prepaid_change - other_recv_change
+                        + ap_change + advance_change + wages_change + tax_change + other_pay_change)
         operating_cashflow = estimated_cf
         cf_is_estimated = True
 
@@ -364,7 +384,7 @@ def _calculate_cashflow_metrics(f: Dict, fp: Dict) -> Dict:
     return metrics
 
 
-def _calculate_operations_metrics(f: Dict) -> Dict:
+def _calculate_operations_metrics(f: Dict, fp: Optional[Dict] = None) -> Dict:
     """计算营运能力指标"""
     metrics = {}
 
@@ -372,6 +392,7 @@ def _calculate_operations_metrics(f: Dict) -> Dict:
     total_assets       = f.get('total_assets', 0) or 0
     accounts_receivable = f.get('accounts_receivable', 0) or 0
     deposit_out        = f.get('deposit_out', 0) or 0
+    inventory          = f.get('inventory', 0) or 0
 
     # 应收账款周转率（担保公司：应收款含存出保证金）
     effective_ar = accounts_receivable + deposit_out
@@ -417,6 +438,52 @@ def _calculate_operations_metrics(f: Dict) -> Dict:
         'score': _score_margin(capital_adequacy, 0.3, 0.6),
         'triggered_rules': [],
     }
+
+    # ── 新增：存货周转天数 ──
+    cost_of_sales = f.get('cost_of_sales', 0) or 0
+    inventory_turnover = safe_div(cost_of_sales, inventory) if inventory > 0 else None
+    inventory_days = safe_div(365, inventory_turnover) if inventory_turnover else None
+    metrics['inventory_days'] = {
+        'label': '存货周转天数',
+        'value': inventory_days,
+        'unit': '天',
+        'benchmark': '行业差异大',
+        'score': _create_sigmoid_scorer(90.0, 3.0, direction='lower_is_better', default=50.0)(inventory_days),
+        'triggered_rules': get_triggered_rules('inventory_growth', inventory_days) if inventory_days is not None and fp else [],
+    }
+
+    # ── 新增：存货增长率（需要上期数据） ──
+    if fp:
+        inv_prev = fp.get('inventory', 0) or 0
+        if inv_prev > 0 and inventory > 0:
+            inv_growth = (inventory - inv_prev) / inv_prev
+            metrics['inventory_growth'] = {
+                'label': '存货增长率',
+                'value': inv_growth,
+                'unit': '%',
+                'benchmark': '< 30%（正常）',
+                'score': max(0, 100 - abs(inv_growth) * 200) if abs(inv_growth) > 0.3 else 85,
+                'triggered_rules': get_triggered_rules('inventory_growth', inv_growth),
+                'trend_type': True,
+            }
+
+    # ── 新增：应收增速与收入增速差距（需要上期数据） ──
+    if fp:
+        ar_prev = fp.get('accounts_receivable', 0) or 0
+        rev_prev = fp.get('revenue', 0) or 0
+        if ar_prev > 0 and rev_prev > 0 and revenue > 0:
+            ar_growth = (accounts_receivable - ar_prev) / ar_prev
+            rev_growth = (revenue - rev_prev) / rev_prev
+            ar_rev_gap = ar_growth - rev_growth
+            metrics['ar_revenue_growth_gap'] = {
+                'label': '应收增速-收入增速差距',
+                'value': ar_rev_gap,
+                'unit': '%',
+                'benchmark': '< 0（应收增速低于收入）',
+                'score': max(0, 100 - ar_rev_gap * 150) if ar_rev_gap > 0 else min(100, 80 + abs(ar_rev_gap) * 100),
+                'triggered_rules': get_triggered_rules('ar_revenue_growth_gap', ar_rev_gap),
+                'trend_type': True,
+            }
 
     return metrics
 
@@ -511,7 +578,7 @@ def calculate_metrics(fin: Dict[str, float], tax: Dict[str, float],
     metrics.update(_calculate_cashflow_metrics(f, fp))
 
     # 营运能力
-    metrics.update(_calculate_operations_metrics(f))
+    metrics.update(_calculate_operations_metrics(f, fp))
 
     # 税务合规
     metrics.update(_calculate_tax_compliance_metrics(f, tax))
@@ -741,9 +808,12 @@ def _calculate_m_score(f: Dict, f_prev: Optional[Dict] = None) -> Optional[float
             # GMI: 毛利率指数
             gmi = gm0 / gross_margin if gross_margin > 0 else 1.0
 
-            # AQI: 资产质量指数
-            aqi_curr = 1 - (fa + (f.get('current_assets') or 0)) / ta
-            aqi_prev = 1 - (fa0 + (f_prev.get('current_assets') or 0)) / ta0
+            # AQI: 资产质量指数（Beneish 原始定义：1 - (长期资产净值/总资产)）
+            # 长期资产 = 固定资产 + 无形资产 + 长期待摊费用
+            lt_assets = fa + (f.get('intangible_assets') or 0) + (f.get('long_term_deferred_expense') or 0)
+            lt_assets0 = fa0 + (f_prev.get('intangible_assets') or 0) + (f_prev.get('long_term_deferred_expense') or 0)
+            aqi_curr = 1 - lt_assets / ta
+            aqi_prev = 1 - lt_assets0 / ta0
             aqi = aqi_curr / aqi_prev if aqi_prev > 0 else 1.0
 
             # SGI: 营收增长指数
