@@ -21,13 +21,51 @@ from .core.analyzer import analyze_company
 from .core.report_generator import generate_html_report
 from .config import get_config, config
 from .tasks import task_manager, get_task_manager, TaskStatus
+from .pdf_report import generate_pdf_report as generate_professional_pdf
 
 # PDF生成
 try:
     import xhtml2pdf.pisa as pisa
+    from reportlab.pdfbase import pdfmetrics
+    # 使用 reportlab 内置的 CID 中文字体（解决 xhtml2pdf 中文乱码问题）
+
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    _cid_fonts = ['STSong-Light', 'HeiseiMin-W3', 'HeiseiKakuGo-W5', 'MSung-Light']
+    _cid_registered = []
+    for _fn in _cid_fonts:
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont(_fn))
+            _cid_registered.append(_fn)
+        except Exception:
+            pass
     PDF_READY = True
 except ImportError:
     PDF_READY = False
+
+
+def _prepare_pdf_html(html: str) -> str:
+    """将 HTML 报告转换为适合 PDF 生成的版本（注入 CID 字体、移除不兼容元素）"""
+    import re
+
+    # 移除 Chart.js 脚本和 Canvas 元素（PDF 不支持）
+    cleaned = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)
+    cleaned = re.sub(r'<canvas[^>]*>.*?</canvas>', '', cleaned, flags=re.DOTALL)
+
+    # 注入 CID 字体样式和 PDF 布局配置
+    # 注意：@page 中不支持 @top-center/@bottom-center 等 margin box（xhtml2pdf 限制）
+    pdf_style = (
+        '<style>'
+        'body{font-family:STSong-Light,HeiseiMin-W3,HeiseiKakuGo-W5,MSung-Light,sans-serif!important;font-size:11pt}'
+        'h1,h2,h3,th,td,span,div,p{font-family:STSong-Light,HeiseiMin-W3,HeiseiKakuGo-W5,MSung-Light,sans-serif!important}'
+        '@page{size:A4;margin:1.5cm 1.2cm}'
+        '.card{break-inside:avoid;page-break-inside:avoid}'
+        '.container{max-width:100%!important}'
+        'canvas{display:none!important}'
+        '</style>'
+    )
+    cleaned = cleaned.replace('</head>', pdf_style + '</head>')
+
+    return cleaned
 
 # ─────────────────────────────────────────────
 # 应用初始化
@@ -287,18 +325,32 @@ def _run_analysis_task(
 
         update_progress(85, "HTML报告生成完成...")
 
-        # 生成PDF
+        # 生成PDF（使用专业PDF报告生成器）
         pdf_path = None
         if PDF_READY and cfg.report.pdf_enabled and report_path.exists():
             try:
                 pdf_filename = f"{company_name}_{session_id}.pdf"
                 pdf_path = REPORT_DIR / pdf_filename
-                with open(report_path, 'r', encoding='utf-8') as f:
-                    html_content = f.read()
+                # 先生成 PDF 优化的 HTML
+                pdf_html_path = REPORT_DIR / f"_{company_name}_{session_id}_pdf.html"
+                generate_professional_pdf(
+                    company_name=company_name,
+                    industry=industry,
+                    analysis_result=result,
+                    output_path=str(pdf_html_path),
+                )
+                # 用 xhtml2pdf 转为 PDF
+                with open(pdf_html_path, 'r', encoding='utf-8') as f:
+                    pdf_html = f.read()
                 with open(pdf_path, 'wb') as pdf_file:
-                    pisa.CreatePDF(html_content, pdf_file)
+                    pisa.CreatePDF(pdf_html, pdf_file, encoding='utf-8')
+                # 清理临时 HTML
+                if pdf_html_path.exists():
+                    pdf_html_path.unlink()
             except Exception as pdf_err:
                 print(f"PDF生成失败: {pdf_err}")
+                import traceback
+                traceback.print_exc()
                 pdf_path = None
 
         update_progress(95, "报告生成完成！")
@@ -400,18 +452,29 @@ async def analyze(
             output_path=str(report_path)
         )
 
-        # 生成PDF
+        # 生成PDF（使用专业PDF报告生成器）
         pdf_path = None
         if PDF_READY and cfg.report.pdf_enabled and report_path.exists():
             try:
                 pdf_filename = f"{company_name}_{session_id}.pdf"
                 pdf_path = REPORT_DIR / pdf_filename
-                with open(report_path, 'r', encoding='utf-8') as f:
-                    html_content = f.read()
+                pdf_html_path = REPORT_DIR / f"_{company_name}_{session_id}_pdf.html"
+                generate_professional_pdf(
+                    company_name=company_name,
+                    industry=industry,
+                    analysis_result=result,
+                    output_path=str(pdf_html_path),
+                )
+                with open(pdf_html_path, 'r', encoding='utf-8') as f:
+                    pdf_html = f.read()
                 with open(pdf_path, 'wb') as pdf_file:
-                    pisa.CreatePDF(html_content, pdf_file)
+                    pisa.CreatePDF(pdf_html, pdf_file, encoding='utf-8')
+                if pdf_html_path.exists():
+                    pdf_html_path.unlink()
             except Exception as pdf_err:
                 print(f"PDF生成失败: {pdf_err}")
+                import traceback
+                traceback.print_exc()
                 pdf_path = None
 
         return JSONResponse(content={
